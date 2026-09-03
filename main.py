@@ -2,8 +2,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 
-from .config import settings
-from .engine import engine
+from config import settings
+from engine import engine
 
 
 @asynccontextmanager
