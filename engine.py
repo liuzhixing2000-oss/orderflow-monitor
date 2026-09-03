@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 import websockets
 
-from .config import settings
+from config import settings
 
 log = logging.getLogger(__name__)
 
