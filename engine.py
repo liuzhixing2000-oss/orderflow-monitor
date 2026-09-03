@@ -11,7 +11,10 @@ from typing import Any
 import httpx
 import websockets
 
-from config import settings
+try:
+    from .config import settings
+except ImportError:  # Flat GitHub upload compatibility.
+    from config import settings
 
 log = logging.getLogger(__name__)
 
@@ -102,17 +105,38 @@ class MarketState:
         windows = {k: self.window(v) for k, v in {"1m":60,"5m":300,"15m":900}.items()}
         cvd = sum(x[1] for x in self.trades)
         book = {"0.1pct": self.book_imbalance(.001), "0.5pct": self.book_imbalance(.005)}
-        signals, score = [], 0
+        signals, long_score, short_score = [], 0, 0
+        s1 = self.structure.get("1h", {}).get("trend")
+        s4 = self.structure.get("4h", {}).get("trend")
+        for trend, weight in ((s4, 15), (s1, 10)):
+            if trend == "up": long_score += weight
+            elif trend == "down": short_score += weight
+            else: long_score += weight//3; short_score += weight//3
+        # Multi-window trade flow: recent activity matters, but agreement matters more.
+        for key, weight in (("1m", 7), ("5m", 10), ("15m", 8)):
+            ratio = windows[key]["buy_ratio"]
+            if ratio is None: continue
+            strength = min(1.0, abs(ratio-.5)/.18)
+            points = round(weight*strength)
+            if ratio > .5: long_score += points
+            elif ratio < .5: short_score += points
         d5 = windows["5m"]["delta_usd"]
-        if d5 > 0: signals.append("5分钟主动买盘占优"); score += 1
-        elif d5 < 0: signals.append("5分钟主动卖盘占优"); score -= 1
+        if d5 > 0: signals.append("5分钟主动买盘占优")
+        elif d5 < 0: signals.append("5分钟主动卖盘占优")
         imb = book["0.1pct"]["imbalance"]
-        if imb is not None and imb > .12: signals.append("近端买盘深度占优"); score += 1
-        elif imb is not None and imb < -.12: signals.append("近端卖盘深度占优"); score -= 1
+        if imb is not None and imb > .12: signals.append("近端买盘深度占优"); long_score += min(5, round(abs(imb)*10))
+        elif imb is not None and imb < -.12: signals.append("近端卖盘深度占优"); short_score += min(5, round(abs(imb)*10))
         oic = self.oi_change(900)
         if oic is not None and abs(oic) >= .15:
             signals.append(f"15分钟OI{'增加' if oic>0 else '下降'} {abs(oic):.2f}%")
-        stance = "买方占优" if score >= 2 else "卖方占优" if score <= -2 else "混合/不明确"
+            if oic > 0:
+                if d5 > 0: long_score += 10
+                elif d5 < 0: short_score += 10
+        # Baseline points prevent absent/noisy features from looking like extreme conviction.
+        long_score = min(100, 25 + long_score)
+        short_score = min(100, 25 + short_score)
+        gap = long_score-short_score
+        stance = "买方占优" if gap >= 15 else "卖方占优" if gap <= -15 else "混合/不明确"
         return {
             "symbol": self.symbol, "timestamp": time.time(), "price": self.price,
             "feed_status": "live" if self.connected else "reconnecting",
@@ -122,7 +146,9 @@ class MarketState:
                               "change_5m_pct": self.oi_change(300), "change_15m_pct": oic},
             "order_book": book, "liquidations_5m": self.liquidation_window(300),
             "structure": self.structure,
-            "assessment": {"stance": stance, "evidence": signals,
+            "assessment": {"long_score": long_score, "short_score": short_score,
+                           "stance": stance, "evidence": signals,
+                           "score_version": "0.2.0-research",
                            "warning": "这是实时状态摘要，不是自动交易信号。"},
         }
 

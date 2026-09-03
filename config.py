@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     book_depth: int = 50
     large_trade_usd: float = 250_000
     history_seconds: int = 86_400
+    data_path: str = "/data/orderflow.db"
+    snapshot_interval_seconds: int = 60
+    round_trip_cost_pct: float = 0.12
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property
@@ -17,4 +20,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-

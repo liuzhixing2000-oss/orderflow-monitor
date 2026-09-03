@@ -1,4 +1,4 @@
-# BTC / ETH / SOL Order Flow Monitor v0.1
+# BTC / ETH / SOL Order Flow Monitor v0.2
 
 一个独立、只读的 Bybit USDT 永续订单流采集器。它不会下单，也不会发送 Telegram 消息。
 
@@ -12,6 +12,8 @@
 - 5m 多空爆仓额、大额主动成交笔数
 - 1H / 4H EMA20、EMA50 与趋势背景
 - 可解释的即时订单流摘要（不是交易信号）
+- 独立 LONG_SCORE / SHORT_SCORE（研究分数，不触发交易）
+- 每分钟保存快照，并统计15/30/60/240分钟后的扣费收益
 
 ## 本地运行
 
@@ -29,6 +31,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 - `http://localhost:8000/snapshot/ETH`
 - `http://localhost:8000/snapshot/SOL`
 - `http://localhost:8000/docs`
+- `http://localhost:8000/research/status`
+- `http://localhost:8000/research/score-buckets/BTC?horizon=60&side=long`
 
 ## Railway 部署
 
@@ -39,6 +43,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
    - `API_KEY`：自己生成的一长串随机字符（推荐）。
    - `SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT`
    - 可选 `LARGE_TRADE_USD=250000`
+   - `DATA_PATH=/data/orderflow.db`
+   - 可选 `ROUND_TRIP_COST_PCT=0.12`
 5. 部署完成后访问 `https://你的域名/health`。
 
 如设置了 `API_KEY`，查询快照时必须放在请求头，不能直接拼在网址中：
@@ -55,6 +61,8 @@ curl -H "X-API-Key: 你的密钥" https://你的域名/snapshot/BTC
 
 - 订单簿来自单一交易所，不代表全市场。
 - CVD 使用 Bybit 主动成交，并在服务重启后从零开始。
-- Railway 若重启，内存中的滚动历史会丢失；下一版可接 PostgreSQL。
+- 实时滚动窗口在重启后重新开始；研究快照存入SQLite。
+- Railway需添加Volume并挂载到 `/data`，否则重新部署可能丢失研究数据库。
 - 盘口失衡会受撤单和诱导挂单影响，不能单独作为入场理由。
 - 目前“判断”只做事实压缩；真正的关键位、吸收和背离仍应结合图表解释。
+- 分数权重是待检验假设；样本不足前不得用分数自动下单。
