@@ -1,6 +1,23 @@
-# BTC / ETH / SOL Order Flow Monitor v0.2
+# BTC / ETH / SOL Order Flow Monitor v0.3
 
-一个独立、只读的 Bybit USDT 永续订单流采集器。它不会下单，也不会发送 Telegram 消息。
+一个独立、只读的 Bybit USDT 永续订单流采集器和 ChatGPT MCP 数据源。它不会下单，也不会发送 Telegram 消息。
+
+## v0.3：ChatGPT 只读 MCP
+
+远程 MCP 地址：
+
+```
+https://orderflow-monitor-production.up.railway.app/mcp/
+```
+
+提供四个只读工具：
+
+- `get_market_snapshot(symbol)`：读取 BTC、ETH 或 SOL 的最新订单流
+- `get_all_market_snapshots()`：读取三个品种的最新状态
+- `get_research_status()`：读取样本积累情况
+- `get_score_bucket_results(symbol, horizon_minutes, side)`：读取评分分组前向结果
+
+MCP没有下单、改单、撤单或交易所账户工具。当前版本的MCP端点不使用API key；请勿在返回数据中加入任何密钥或账户信息。
 
 ## 当前提供的数据
 
@@ -11,58 +28,41 @@
 - 价格上下 0.1% 和 0.5% 的订单簿失衡
 - 5m 多空爆仓额、大额主动成交笔数
 - 1H / 4H EMA20、EMA50 与趋势背景
-- 可解释的即时订单流摘要（不是交易信号）
 - 独立 LONG_SCORE / SHORT_SCORE（研究分数，不触发交易）
 - 每分钟保存快照，并统计15/30/60/240分钟后的扣费收益
 
-## 本地运行
+## HTTP接口
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+- `/health`
+- `/snapshot/BTC`
+- `/snapshot/ETH`
+- `/snapshot/SOL`
+- `/research/status`
+- `/research/score-buckets/BTC?horizon=60&side=long`
+- `/docs`
+
+普通HTTP接口继续受可选的 `X-API-Key` 保护；MCP接口当前只暴露非敏感的只读市场数据。
+
+## Railway
+
+Start command:
+
+```
+uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
 
-打开：
+建议变量：
 
-- `http://localhost:8000/health`
-- `http://localhost:8000/snapshot/BTC`
-- `http://localhost:8000/snapshot/ETH`
-- `http://localhost:8000/snapshot/SOL`
-- `http://localhost:8000/docs`
-- `http://localhost:8000/research/status`
-- `http://localhost:8000/research/score-buckets/BTC?horizon=60&side=long`
+- `SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT`
+- `DATA_PATH=/data/orderflow.db`
+- 可选 `LARGE_TRADE_USD=250000`
+- 可选 `ROUND_TRIP_COST_PCT=0.12`
+- 可选 `API_KEY`（仅保护普通HTTP接口）
 
-## Railway 部署
+## 限制
 
-1. 把 `orderflow-monitor` 作为一个全新的 GitHub 仓库上传，不要放进 BTC Tide Watch。
-2. Railway 新建 Project → Deploy from GitHub repo。
-3. Root Directory 留空；程序已包含 `railway.json` 和 `Procfile`。
-4. 在 Variables 添加：
-   - `API_KEY`：自己生成的一长串随机字符（推荐）。
-   - `SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT`
-   - 可选 `LARGE_TRADE_USD=250000`
-   - `DATA_PATH=/data/orderflow.db`
-   - 可选 `ROUND_TRIP_COST_PCT=0.12`
-5. 部署完成后访问 `https://你的域名/health`。
-
-如设置了 `API_KEY`，查询快照时必须放在请求头，不能直接拼在网址中：
-
-```bash
-curl -H "X-API-Key: 你的密钥" https://你的域名/snapshot/BTC
-```
-
-## 如何让我读取
-
-部署后，把 Railway 的公开域名发给我。初版若启用 API key，普通网页搜索无法自定义请求头；后续可以增加一个短时签名读取端点或自定义连接器。不要把真实 API key 发到聊天里。
-
-## 初版限制
-
-- 订单簿来自单一交易所，不代表全市场。
-- CVD 使用 Bybit 主动成交，并在服务重启后从零开始。
-- 实时滚动窗口在重启后重新开始；研究快照存入SQLite。
-- Railway需添加Volume并挂载到 `/data`，否则重新部署可能丢失研究数据库。
-- 盘口失衡会受撤单和诱导挂单影响，不能单独作为入场理由。
-- 目前“判断”只做事实压缩；真正的关键位、吸收和背离仍应结合图表解释。
-- 分数权重是待检验假设；样本不足前不得用分数自动下单。
+- 分数权重尚未验证，不得把高分直接视为可盈利信号。
+- 订单簿来自单一交易所，且挂单可能撤销。
+- CVD和实时滚动窗口会随服务重启重新开始。
+- 分钟快照高度相关；正式回测需使用阈值穿越、冷却期和样本外数据。
+- MCP只解决ChatGPT读取问题，不会自动提高判断准确率。
