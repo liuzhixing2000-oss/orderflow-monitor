@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
 import asyncio
+import json
+import logging
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from mcp.server.fastmcp import FastMCP
@@ -12,6 +14,9 @@ except ImportError:  # Flat GitHub upload compatibility.
     from config import settings
     from engine import engine
     from storage import storage
+
+
+log = logging.getLogger("orderflow.snapshot")
 
 
 def normalize_symbol(symbol: str) -> str:
@@ -87,7 +92,11 @@ mcp_http_app = mcp.streamable_http_app()
 async def snapshot_sampler():
     while True:
         for state in engine.states.values():
-            await asyncio.to_thread(storage.insert, state.snapshot())
+            snapshot = state.snapshot()
+            await asyncio.to_thread(storage.insert, snapshot)
+            # Public market data only. This lets the connected Railway app provide
+            # the latest snapshot when direct HTTP/MCP access is unavailable.
+            log.info("ORDERFLOW_SNAPSHOT %s", json.dumps(snapshot, separators=(",", ":")))
         await asyncio.sleep(settings.snapshot_interval_seconds)
 
 
