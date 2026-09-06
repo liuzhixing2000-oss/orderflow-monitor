@@ -6,7 +6,9 @@ class Settings(BaseSettings):
     api_key: str = ""
     bybit_ws_url: str = "wss://stream.bybit.com/v5/public/linear"
     bybit_rest_url: str = "https://api.bybit.com"
-    book_depth: int = 50
+    # Bybit linear orderbook supports L200. L50 was often entirely inside 0.1%
+    # for BTC/ETH, making the nominal 0.5% depth identical to 0.1%.
+    book_depth: int = 200
     large_trade_usd: float = 250_000
     history_seconds: int = 86_400
     data_path: str = "/data/orderflow.db"
