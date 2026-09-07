@@ -11,6 +11,25 @@ def snapshot(ts, score, price=100.0, eligible=True, regime="TREND_UP"):
         "timestamp": ts,
         "symbol": "BTCUSDT",
         "price": price,
+        "trade_flow": {
+            "1m": {
+                "buy_usd": 60.0,
+                "sell_usd": 40.0,
+                "delta_usd": 20.0,
+                "buy_ratio": 0.6,
+                "trade_count": 10,
+                "large_buy_count": 0,
+                "large_sell_count": 0,
+            }
+        },
+        "open_interest": {"change_5m_pct": 0.01, "change_15m_pct": 0.02},
+        "order_book": {
+            "0.1pct": {"imbalance": 0.1, "coverage_complete": True},
+            "0.5pct": {"imbalance": 0.05, "coverage_complete": True},
+        },
+        "price_stats": {
+            "5m": {"return_pct": 0.05},
+        },
         "assessment": {
             "long_score": 50,
             "short_score": 50,
@@ -20,6 +39,16 @@ def snapshot(ts, score, price=100.0, eligible=True, regime="TREND_UP"):
             "version": "test-model",
             "data_quality": {"state": "OK" if eligible else "WARMUP_4H", "eligible": eligible},
             "regime": {"label": regime if eligible else "WARMUP", "eligible": eligible},
+            "features": {
+                "normalized_delta": {"1m": 0.2, "5m": 0.1, "15m": 0.05},
+                "flow_acceleration_1m_minus_5m": 0.1,
+                "flow_acceleration_5m_minus_15m": 0.05,
+                "activity_burst_1m_vs_5m": 1.1,
+                "activity_burst_5m_vs_15m": 1.0,
+                "liquidations": {"intensity_vs_5m_volume": 0.01, "directional_skew": 0.2},
+                "book_shape": {"near_minus_far": 0.05},
+                "price_response_efficiency": {"5m": 0.5},
+            },
             "continuation": {
                 "long": score,
                 "short": 0,
@@ -28,6 +57,20 @@ def snapshot(ts, score, price=100.0, eligible=True, regime="TREND_UP"):
             },
         },
     }
+
+
+def dense_15m_path(event_ts):
+    """91 ten-second points: 100 -> 98 -> 103 -> 102."""
+    points = []
+    for i in range(91):
+        if i <= 30:
+            price = 100.0 - 2.0 * (i / 30)
+        elif i <= 60:
+            price = 98.0 + 5.0 * ((i - 30) / 30)
+        else:
+            price = 103.0 - 1.0 * ((i - 60) / 30)
+        points.append((event_ts + i * 10, "BTCUSDT", price))
+    return points
 
 
 class ResearchEventStorageTest(unittest.TestCase):
@@ -70,22 +113,60 @@ class ResearchEventStorageTest(unittest.TestCase):
         allowed = self.storage.insert(snapshot(now + 15_060, 65, eligible=True))
         self.assertIn(60, [x["threshold"] for x in allowed])
 
-    def test_event_results_include_net_return_mfe_and_mae(self):
-        event_ts = time.time() - 4_000
+    def test_event_results_use_dense_path_for_net_return_mfe_and_mae(self):
+        # Old enough for 15m + the 3m materialization tolerance, but not old
+        # enough to accidentally mature every longer horizon in this test.
+        event_ts = time.time() - 1_500
         self.storage.insert(snapshot(event_ts - 60, 40, price=100.0, eligible=True))
         self.storage.insert(snapshot(event_ts, 65, price=100.0, eligible=True))
+        self.storage.insert_price_points(dense_15m_path(event_ts))
 
-        # Disable research eligibility for follow-up snapshots so they only act
-        # as the future price path for evaluation.
-        self.storage.insert(snapshot(event_ts + 300, 0, price=98.0, eligible=False))
-        self.storage.insert(snapshot(event_ts + 600, 0, price=103.0, eligible=False))
-        self.storage.insert(snapshot(event_ts + 900, 0, price=102.0, eligible=False))
+        materialized = self.storage.evaluate_pending_outcomes()
+        self.assertGreaterEqual(materialized["quality_ok"], 1)
 
         result = self.storage.event_results("BTCUSDT", 15, "long", 60)
         self.assertEqual(result["events_evaluated"], 1)
+        self.assertEqual(result["outcomes_excluded_data_quality"], 0)
         self.assertAlmostEqual(result["avg_net_return_pct"], 1.88, places=4)
         self.assertAlmostEqual(result["avg_mfe_pct"], 3.0, places=4)
         self.assertAlmostEqual(result["avg_mae_pct"], -2.0, places=4)
+        self.assertGreaterEqual(result["avg_path_coverage_ratio"], 0.99)
+        self.assertLessEqual(result["max_gap_seconds"], 10.1)
+
+    def test_low_coverage_event_is_materialized_but_excluded(self):
+        event_ts = time.time() - 1_500
+        self.storage.insert(snapshot(event_ts - 60, 40, eligible=True))
+        self.storage.insert(snapshot(event_ts, 65, eligible=True))
+        sparse = [
+            (event_ts, "BTCUSDT", 100.0),
+            (event_ts + 450, "BTCUSDT", 101.0),
+            (event_ts + 900, "BTCUSDT", 102.0),
+        ]
+        self.storage.insert_price_points(sparse)
+        self.storage.evaluate_pending_outcomes()
+        result = self.storage.event_results("BTCUSDT", 15, "long", 60)
+        self.assertEqual(result["outcomes_materialized"], 1)
+        self.assertEqual(result["outcomes_excluded_data_quality"], 1)
+        self.assertEqual(result["events_evaluated"], 0)
+
+    def test_event_payload_contains_past_only_historical_context(self):
+        base_ts = time.time() - 5_000
+        # Seed prior snapshots before the valid crossing.
+        for i in range(35):
+            self.storage.insert(snapshot(base_ts + i * 60, 40, eligible=True))
+        event_ts = base_ts + 36 * 60
+        self.storage.insert(snapshot(event_ts - 60, 40, eligible=True))
+        self.storage.insert(snapshot(event_ts, 65, eligible=True))
+
+        with self.storage.connect() as db:
+            row = db.execute(
+                "SELECT payload FROM research_events WHERE threshold=60 ORDER BY ts DESC LIMIT 1"
+            ).fetchone()
+        payload = __import__("json").loads(row["payload"])
+        context = payload["historical_context"]
+        self.assertTrue(context["strictly_past_only"])
+        self.assertGreaterEqual(context["past_snapshots_considered"], 30)
+        self.assertTrue(context["distributions"]["delta_norm_1m"]["eligible"])
 
     def test_price_path_can_be_restored(self):
         now = time.time()
