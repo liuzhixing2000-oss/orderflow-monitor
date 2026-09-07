@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 import asyncio
 import json
 import logging
+import os
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from mcp.server.fastmcp import FastMCP
@@ -10,10 +11,12 @@ try:
     from .config import settings
     from .engine import engine
     from .storage import storage
+    from .legacy_replay_backtest import main as run_legacy_replay
 except ImportError:  # Flat GitHub upload compatibility.
     from config import settings
     from engine import engine
     from storage import storage
+    from legacy_replay_backtest import main as run_legacy_replay
 
 
 log = logging.getLogger("orderflow.snapshot")
@@ -105,11 +108,18 @@ async def lifespan(app: FastAPI):
     storage.init()
     await engine.start()
     sampler = asyncio.create_task(snapshot_sampler())
+    replay_task = None
+    if os.getenv("RUN_LEGACY_REPLAY", "0") == "1":
+        # Run only as an explicitly enabled, read-only background research job.
+        # It reads the mounted historical SQLite DB and never places orders.
+        replay_task = asyncio.create_task(asyncio.to_thread(run_legacy_replay))
     try:
         async with mcp.session_manager.run():
             yield
     finally:
         sampler.cancel()
+        if replay_task and not replay_task.done():
+            replay_task.cancel()
         await engine.stop()
 
 
