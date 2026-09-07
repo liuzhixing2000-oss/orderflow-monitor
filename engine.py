@@ -104,12 +104,26 @@ class MarketState:
         }
 
     def local_structure(self) -> dict[str, Any]:
+        """Fallback HTF structure built only from a genuinely warmed price path.
+
+        Railway currently receives 403 from Bybit REST. A few dense minutes of
+        websocket ticks must therefore never be labelled as a 1h/4h trend.
+        """
         out: dict[str, Any] = {}
-        for label, seconds, min_move in (("1h", 3600, 0.05), ("4h", 14400, 0.15)):
+        configs = (
+            ("1h", 3600, 0.05, settings.research_min_1h_span_seconds, settings.research_min_1h_samples),
+            ("4h", 14400, 0.15, settings.research_min_4h_span_seconds, settings.research_min_4h_samples),
+        )
+        for label, seconds, min_move, required_span, required_samples in configs:
             stat = self.price_stats(seconds)
             ret = stat.get("return_pct")
             eff = stat.get("efficiency")
-            if ret is None or eff is None:
+            span = float(stat.get("span_seconds") or 0.0)
+            samples = int(stat.get("samples") or 0)
+            warmed = span >= required_span and samples >= required_samples
+            if not warmed:
+                trend = "warmup"
+            elif ret is None or eff is None:
                 trend = "range"
             elif ret >= min_move and eff >= 0.18:
                 trend = "up"
@@ -119,9 +133,13 @@ class MarketState:
                 trend = "range"
             out[label] = {
                 "trend": trend,
+                "eligible": warmed,
                 "return_pct": ret,
                 "directional_efficiency": eff,
-                "samples": stat.get("samples"),
+                "samples": samples,
+                "span_seconds": span,
+                "required_span_seconds": required_span,
+                "required_samples": required_samples,
                 "source": "local_trade_path_fallback",
             }
         return out
