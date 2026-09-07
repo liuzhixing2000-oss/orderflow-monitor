@@ -1,0 +1,37 @@
+name: Research model tests
+
+on:
+  pull_request:
+    paths:
+      - "research_models.py"
+      - "historical_context.py"
+      - "engine.py"
+      - "config.py"
+      - "main.py"
+      - "storage.py"
+      - "requirements.txt"
+      - "test_research_models.py"
+      - "test_research_events.py"
+      - "test_engine_research.py"
+      - "test_historical_context.py"
+      - ".github/workflows/research-model-tests.yml"
+  push:
+    branches:
+      - "research/regime-model-v0.1"
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile changed Python modules
+        run: python -m py_compile config.py research_models.py historical_context.py engine.py storage.py main.py
+      - name: Run research model, event, history and engine tests
+        run: python -m unittest test_research_models.py test_research_events.py test_historical_context.py test_engine_research.py
+      - name: Import application smoke test
+        run: python -c "import main; assert main.app.title == 'Crypto Order Flow Monitor'; print('app import ok')"
