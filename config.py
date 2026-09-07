@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     research_event_thresholds: str = "50,60,70,80,90"
     research_event_cooldown_minutes: int = 240
     research_price_path_interval_seconds: int = 10
+    # Keep enough 10-second path history to evaluate MAE/MFE for weeks of
+    # independent events; in-memory trade/order-flow history remains much shorter.
+    research_price_path_retention_days: int = 30
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
