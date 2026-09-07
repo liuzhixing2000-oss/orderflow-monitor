@@ -7,8 +7,10 @@ on:
       - "engine.py"
       - "config.py"
       - "main.py"
+      - "storage.py"
       - "requirements.txt"
       - "test_research_models.py"
+      - "test_research_events.py"
       - ".github/workflows/research-model-tests.yml"
   push:
     branches:
@@ -25,8 +27,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Compile changed Python modules
-        run: python -m py_compile config.py research_models.py engine.py main.py
-      - name: Run research-model tests
-        run: python -m unittest test_research_models.py
+        run: python -m py_compile config.py research_models.py engine.py storage.py main.py
+      - name: Run research-model and event tests
+        run: python -m unittest test_research_models.py test_research_events.py
       - name: Import application smoke test
         run: python -c "import main; assert main.app.title == 'Crypto Order Flow Monitor'; print('app import ok')"
