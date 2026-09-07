@@ -8,7 +8,7 @@ except ImportError:  # Flat GitHub upload compatibility.
     from config import settings
 
 
-MODEL_VERSION = "0.1.1-research"
+MODEL_VERSION = "0.1.2-research"
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -48,6 +48,62 @@ def large_trade_skew(window: dict[str, Any] | None) -> float | None:
     sells = int(window.get("large_sell_count") or 0)
     total = buys + sells
     return (buys - sells) / total if total else None
+
+
+def liquidation_features(snapshot: dict[str, Any], flow_5m: dict[str, Any] | None) -> dict[str, Any]:
+    """Normalize forced liquidations by contemporaneous traded notional.
+
+    Absolute liquidation USD cannot be compared fairly across BTC/ETH/SOL, so
+    these diagnostics are ratios. `directional_skew` is positive when short
+    liquidations dominate and negative when long liquidations dominate.
+    """
+    liq = snapshot.get("liquidations_5m") or {}
+    long_usd = float(liq.get("long_usd") or 0.0)
+    short_usd = float(liq.get("short_usd") or 0.0)
+    total_liq = long_usd + short_usd
+    traded = 0.0
+    if flow_5m:
+        traded = float(flow_5m.get("buy_usd") or 0.0) + float(flow_5m.get("sell_usd") or 0.0)
+    return {
+        "total_usd": round(total_liq, 2),
+        "intensity_vs_5m_volume": round(total_liq / traded, 6) if traded > 0 else None,
+        "long_intensity_vs_5m_volume": round(long_usd / traded, 6) if traded > 0 else None,
+        "short_intensity_vs_5m_volume": round(short_usd / traded, 6) if traded > 0 else None,
+        "directional_skew": round((short_usd - long_usd) / total_liq, 4) if total_liq > 0 else None,
+    }
+
+
+def book_shape(order_book: dict[str, Any] | None) -> dict[str, Any]:
+    """Describe near-vs-far imbalance without pretending incomplete depth is valid."""
+    order_book = order_book or {}
+    near = order_book.get("0.1pct") or {}
+    far = order_book.get("0.5pct") or {}
+    near_imb = near.get("imbalance")
+    far_imb = far.get("imbalance")
+    near_complete = bool(near.get("coverage_complete"))
+    far_complete = bool(far.get("coverage_complete"))
+    slope = None
+    if near_imb is not None and far_imb is not None and near_complete and far_complete:
+        slope = round(float(near_imb) - float(far_imb), 4)
+    return {
+        "near_imbalance": near_imb,
+        "far_imbalance": far_imb,
+        "near_complete": near_complete,
+        "far_complete": far_complete,
+        "near_minus_far": slope,
+        "usable_for_shape": slope is not None,
+    }
+
+
+def response_efficiency(price_return_pct: float | None, norm_delta: float | None) -> float | None:
+    """Price response per unit of normalized aggressive flow.
+
+    Low values during strong flow are useful as absorption candidates; this is
+    diagnostic only and is not assigned new score weight in v0.1.2.
+    """
+    if price_return_pct is None or norm_delta is None or abs(norm_delta) < 0.02:
+        return None
+    return round(abs(float(price_return_pct)) / abs(float(norm_delta)), 5)
 
 
 def _positioning_label(price_return_5m: float | None,
@@ -253,6 +309,8 @@ def _data_quality(snapshot: dict[str, Any], stats: dict[str, Any]) -> dict[str, 
     else:
         state = "OK"
 
+    progress_1h = _clamp(span1 / settings.research_min_1h_span_seconds, 0, 1)
+    progress_4h = _clamp(span4 / settings.research_min_4h_span_seconds, 0, 1)
     return {
         "state": state,
         "eligible": state == "OK",
@@ -260,6 +318,8 @@ def _data_quality(snapshot: dict[str, Any], stats: dict[str, Any]) -> dict[str, 
         "price_samples_4h": samples4,
         "span_1h_seconds": round(span1, 1),
         "span_4h_seconds": round(span4, 1),
+        "warmup_progress_1h_pct": round(progress_1h * 100, 1),
+        "warmup_progress_4h_pct": round(progress_4h * 100, 1),
         "required_span_1h_seconds": settings.research_min_1h_span_seconds,
         "required_span_4h_seconds": settings.research_min_4h_span_seconds,
         "required_samples_1h": settings.research_min_1h_samples,
@@ -270,8 +330,12 @@ def _data_quality(snapshot: dict[str, Any], stats: dict[str, Any]) -> dict[str, 
 def build_research_models(snapshot: dict[str, Any]) -> dict[str, Any]:
     flow = snapshot.get("trade_flow", {})
     stats = snapshot.get("price_stats", {})
+    order_book = snapshot.get("order_book", {})
 
     nd = {k: normalized_delta(flow.get(k)) for k in ("1m", "5m", "15m")}
+    p1 = (stats.get("1m") or {}).get("return_pct")
+    p5 = (stats.get("5m") or {}).get("return_pct")
+    p15 = (stats.get("15m") or {}).get("return_pct")
     features = {
         "normalized_delta": {k: round(v, 4) if v is not None else None for k, v in nd.items()},
         "flow_acceleration_1m_minus_5m": round(nd["1m"] - nd["5m"], 4) if nd["1m"] is not None and nd["5m"] is not None else None,
@@ -279,15 +343,21 @@ def build_research_models(snapshot: dict[str, Any]) -> dict[str, Any]:
         "activity_burst_1m_vs_5m": activity_burst(flow.get("1m"), flow.get("5m"), 1, 5),
         "activity_burst_5m_vs_15m": activity_burst(flow.get("5m"), flow.get("15m"), 5, 15),
         "large_trade_skew_15m": large_trade_skew(flow.get("15m")),
+        "liquidations": liquidation_features(snapshot, flow.get("5m")),
+        "book_shape": book_shape(order_book),
+        "price_response_efficiency": {
+            "1m": response_efficiency(p1, nd.get("1m")),
+            "5m": response_efficiency(p5, nd.get("5m")),
+            "15m": response_efficiency(p15, nd.get("15m")),
+        },
         "price_stats": stats,
         "open_interest": snapshot.get("open_interest", {}),
-        "order_book": snapshot.get("order_book", {}),
+        "order_book": order_book,
     }
     for key in ("activity_burst_1m_vs_5m", "activity_burst_5m_vs_15m", "large_trade_skew_15m"):
         if isinstance(features[key], float):
             features[key] = round(features[key], 4)
 
-    p5 = (stats.get("5m") or {}).get("return_pct")
     features["positioning_5m"] = _positioning_label(
         p5, nd.get("5m"), (snapshot.get("open_interest") or {}).get("change_5m_pct")
     )
@@ -329,5 +399,5 @@ def build_research_models(snapshot: dict[str, Any]) -> dict[str, Any]:
         },
         "reversal": {"status": "NOT_IMPLEMENTED_IN_V0.1"},
         "range": {"status": "NOT_IMPLEMENTED_IN_V0.1"},
-        "warning": "Research hypothesis only; scores are not validated trading signals.",
+        "warning": "Research hypothesis only; new diagnostics in v0.1.2 do not change continuation score weights.",
     }
