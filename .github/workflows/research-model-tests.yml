@@ -6,6 +6,8 @@ on:
       - "research_models.py"
       - "engine.py"
       - "config.py"
+      - "main.py"
+      - "requirements.txt"
       - "test_research_models.py"
       - ".github/workflows/research-model-tests.yml"
   push:
@@ -20,5 +22,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile changed Python modules
+        run: python -m py_compile config.py research_models.py engine.py main.py
       - name: Run research-model tests
         run: python -m unittest test_research_models.py
+      - name: Import application smoke test
+        run: python -c "import main; assert main.app.title == 'Crypto Order Flow Monitor'; print('app import ok')"
