@@ -25,11 +25,11 @@ def base_snapshot():
             "15m": window(650, 350, 3, 1),
         },
         "price_stats": {
-            "1m": {"return_pct": 0.03, "efficiency": 0.25, "samples": 6},
-            "5m": {"return_pct": -0.05, "efficiency": 0.20, "samples": 30},
-            "15m": {"return_pct": 0.12, "efficiency": 0.25, "samples": 90},
-            "1h": {"return_pct": 0.40, "efficiency": 0.50, "samples": 360},
-            "4h": {"return_pct": 1.00, "efficiency": 0.50, "samples": 1440},
+            "1m": {"return_pct": 0.03, "efficiency": 0.25, "samples": 6, "span_seconds": 59},
+            "5m": {"return_pct": -0.05, "efficiency": 0.20, "samples": 30, "span_seconds": 299},
+            "15m": {"return_pct": 0.12, "efficiency": 0.25, "samples": 90, "span_seconds": 899},
+            "1h": {"return_pct": 0.40, "efficiency": 0.50, "samples": 360, "span_seconds": 3590},
+            "4h": {"return_pct": 1.00, "efficiency": 0.50, "samples": 1440, "span_seconds": 14390},
         },
         "open_interest": {"change_5m_pct": 0.10, "change_15m_pct": 0.15},
         "order_book": {
@@ -50,6 +50,7 @@ class ResearchModelTest(unittest.TestCase):
         # keeping 1m flow positive as the re-acceleration trigger.
         snap["trade_flow"]["5m"] = window(400, 600)
         model = build_research_models(snap)
+        self.assertEqual(model["data_quality"]["state"], "OK")
         self.assertEqual(model["regime"]["label"], "TREND_UP")
         self.assertGreaterEqual(model["continuation"]["long"], 65)
         self.assertTrue(model["continuation"]["long_absorption"])
@@ -68,6 +69,18 @@ class ResearchModelTest(unittest.TestCase):
         snap["last_update_age_seconds"] = 8.0
         model = build_research_models(snap)
         self.assertEqual(model["data_quality"]["state"], "STALE_FEED")
+        self.assertEqual(model["regime"]["label"], "UNAVAILABLE")
+        self.assertEqual(model["continuation"]["long_state"], "DATA_QUALITY_BLOCK")
+        self.assertEqual(model["continuation"]["short_state"], "DATA_QUALITY_BLOCK")
+
+    def test_dense_few_minutes_cannot_pass_4h_warmup(self):
+        snap = base_snapshot()
+        snap["price_stats"]["1h"].update(samples=500, span_seconds=360)
+        snap["price_stats"]["4h"].update(samples=2000, span_seconds=360)
+        model = build_research_models(snap)
+        self.assertEqual(model["data_quality"]["state"], "WARMUP_4H")
+        self.assertFalse(model["data_quality"]["eligible"])
+        self.assertEqual(model["regime"]["label"], "WARMUP")
         self.assertEqual(model["continuation"]["long_state"], "DATA_QUALITY_BLOCK")
         self.assertEqual(model["continuation"]["short_state"], "DATA_QUALITY_BLOCK")
 
