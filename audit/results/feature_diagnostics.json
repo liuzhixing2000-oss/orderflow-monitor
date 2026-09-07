@@ -1,0 +1,35 @@
+{
+  "BTCUSDT": {
+    "rows": 5444,
+    "eligible_rows": 5216,
+    "logged_but_not_stored_missing_price": 3,
+    "missing_1m_price_return": 5216,
+    "eligible_stale_age_gt5": 2,
+    "same_input_no_book_formula_mismatches": 0,
+    "live_rounding_on_legacy_inputs_mismatches": 7,
+    "first_eligible_utc": "2026-09-03T07:23:41.044446+00:00",
+    "genuine_10s_sampling_parity": "UNAVAILABLE_IN_LEGACY_DATA"
+  },
+  "ETHUSDT": {
+    "rows": 5444,
+    "eligible_rows": 5216,
+    "logged_but_not_stored_missing_price": 3,
+    "missing_1m_price_return": 5216,
+    "eligible_stale_age_gt5": 3,
+    "same_input_no_book_formula_mismatches": 0,
+    "live_rounding_on_legacy_inputs_mismatches": 1,
+    "first_eligible_utc": "2026-09-03T07:23:41.137248+00:00",
+    "genuine_10s_sampling_parity": "UNAVAILABLE_IN_LEGACY_DATA"
+  },
+  "SOLUSDT": {
+    "rows": 5444,
+    "eligible_rows": 5216,
+    "logged_but_not_stored_missing_price": 3,
+    "missing_1m_price_return": 5216,
+    "eligible_stale_age_gt5": 2,
+    "same_input_no_book_formula_mismatches": 0,
+    "live_rounding_on_legacy_inputs_mismatches": 3,
+    "first_eligible_utc": "2026-09-03T07:23:41.178952+00:00",
+    "genuine_10s_sampling_parity": "UNAVAILABLE_IN_LEGACY_DATA"
+  }
+}
