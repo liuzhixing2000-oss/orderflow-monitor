@@ -2,18 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
+try:
+    from .config import settings
+except ImportError:  # Flat GitHub upload compatibility.
+    from config import settings
 
-MODEL_VERSION = "0.1.0-research"
+
+MODEL_VERSION = "0.1.1-research"
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
-
-
-def _safe_div(num: float | None, den: float | None) -> float | None:
-    if num is None or den in (None, 0):
-        return None
-    return num / den
 
 
 def normalized_delta(window: dict[str, Any] | None) -> float | None:
@@ -233,11 +232,44 @@ def _continuation_side(features: dict[str, Any], regime: dict[str, Any], side: s
     return {"score": score, "state": state, "absorption": absorption, "evidence": evidence}
 
 
+def _data_quality(snapshot: dict[str, Any], stats: dict[str, Any]) -> dict[str, Any]:
+    age = snapshot.get("last_update_age_seconds")
+    feed_status = snapshot.get("feed_status")
+    stat1 = stats.get("1h") or {}
+    stat4 = stats.get("4h") or {}
+    span1 = float(stat1.get("span_seconds") or 0.0)
+    span4 = float(stat4.get("span_seconds") or 0.0)
+    samples1 = int(stat1.get("samples") or 0)
+    samples4 = int(stat4.get("samples") or 0)
+
+    if feed_status != "live" or age is None or age > 5:
+        state = "STALE_FEED"
+    elif span4 < settings.research_min_4h_span_seconds:
+        state = "WARMUP_4H"
+    elif span1 < settings.research_min_1h_span_seconds:
+        state = "WARMUP_1H"
+    elif samples4 < settings.research_min_4h_samples or samples1 < settings.research_min_1h_samples:
+        state = "GAPPED_HISTORY"
+    else:
+        state = "OK"
+
+    return {
+        "state": state,
+        "eligible": state == "OK",
+        "price_samples_1h": samples1,
+        "price_samples_4h": samples4,
+        "span_1h_seconds": round(span1, 1),
+        "span_4h_seconds": round(span4, 1),
+        "required_span_1h_seconds": settings.research_min_1h_span_seconds,
+        "required_span_4h_seconds": settings.research_min_4h_span_seconds,
+        "required_samples_1h": settings.research_min_1h_samples,
+        "required_samples_4h": settings.research_min_4h_samples,
+    }
+
+
 def build_research_models(snapshot: dict[str, Any]) -> dict[str, Any]:
     flow = snapshot.get("trade_flow", {})
     stats = snapshot.get("price_stats", {})
-    age = snapshot.get("last_update_age_seconds")
-    feed_status = snapshot.get("feed_status")
 
     nd = {k: normalized_delta(flow.get(k)) for k in ("1m", "5m", "15m")}
     features = {
@@ -260,23 +292,29 @@ def build_research_models(snapshot: dict[str, Any]) -> dict[str, Any]:
         p5, nd.get("5m"), (snapshot.get("open_interest") or {}).get("change_5m_pct")
     )
 
-    samples4h = (stats.get("4h") or {}).get("samples") or 0
-    data_state = "OK"
-    if feed_status != "live" or (age is not None and age > 5):
-        data_state = "STALE_FEED"
-    elif samples4h < 30:
-        data_state = "WARMUP"
+    quality = _data_quality(snapshot, stats)
+    raw_regime = _regime(features)
+    long = _continuation_side(features, raw_regime, "long")
+    short = _continuation_side(features, raw_regime, "short")
 
-    regime = _regime(features)
-    long = _continuation_side(features, regime, "long")
-    short = _continuation_side(features, regime, "short")
-    if data_state == "STALE_FEED":
+    # Never publish a usable HTF regime before the clock-time warmup has really
+    # completed. The raw classifier is retained only as diagnostics so that a
+    # dense few minutes of ticks cannot masquerade as a 4h trend.
+    if quality["eligible"]:
+        regime = {**raw_regime, "eligible": True, "raw_label": raw_regime["label"]}
+    else:
+        regime = {
+            **raw_regime,
+            "label": "WARMUP" if quality["state"].startswith("WARMUP") else "UNAVAILABLE",
+            "raw_label": raw_regime["label"],
+            "eligible": False,
+        }
         long["state"] = "DATA_QUALITY_BLOCK"
         short["state"] = "DATA_QUALITY_BLOCK"
 
     return {
         "version": MODEL_VERSION,
-        "data_quality": {"state": data_state, "price_samples_4h": samples4h},
+        "data_quality": quality,
         "features": features,
         "regime": regime,
         "continuation": {
