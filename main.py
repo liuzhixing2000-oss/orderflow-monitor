@@ -17,7 +17,7 @@ except ImportError:  # Flat GitHub upload compatibility.
     from storage import storage
 
 
-APP_VERSION = "0.3.2-research"
+APP_VERSION = "0.3.3-research"
 log = logging.getLogger("orderflow.snapshot")
 
 
@@ -40,7 +40,10 @@ def research_status_payload() -> dict:
     return {
         "database": storage.path,
         "observations": storage.status(),
+        "price_path": storage.price_path_status(),
+        "price_path_retention_days": settings.research_price_path_retention_days,
         "independent_events": storage.event_status(),
+        "materialized_outcomes": storage.outcome_status(),
         "event_thresholds": settings.research_threshold_list,
         "event_cooldown_minutes": settings.research_event_cooldown_minutes,
         "warmup": {
@@ -49,7 +52,7 @@ def research_status_payload() -> dict:
             "min_1h_samples": settings.research_min_1h_samples,
             "min_4h_samples": settings.research_min_4h_samples,
         },
-        "note": "Only clock-time-qualified threshold crossings are eligible for independent event research.",
+        "note": "Only clock-time-qualified threshold crossings are eligible. Matured outcomes are materialized from the 10-second path and retained after raw path pruning.",
     }
 
 
@@ -80,7 +83,7 @@ def get_all_market_snapshots() -> dict:
 
 @mcp.tool()
 def get_research_status() -> dict:
-    """Return stored observation/event counts and validation configuration."""
+    """Return observation, price-path, event and materialized-outcome counts."""
     return research_status_payload()
 
 
@@ -104,7 +107,7 @@ def get_score_bucket_results(symbol: str, horizon_minutes: int = 60, side: str =
 @mcp.tool()
 def get_threshold_event_results(symbol: str, horizon_minutes: int = 60,
                                 side: str = "long", threshold: int = 80) -> dict:
-    """Evaluate independent continuation threshold-crossing events after costs."""
+    """Return materialized independent continuation threshold-event results after costs."""
     normalized = normalize_symbol(symbol)
     if normalized not in engine.states:
         raise ValueError(f"Unsupported symbol. Supported: {', '.join(settings.symbol_list)}")
@@ -156,6 +159,15 @@ async def price_path_sampler():
         await asyncio.sleep(settings.research_price_path_interval_seconds)
 
 
+async def outcome_sampler():
+    """Persist matured event outcomes before old 10-second path rows are pruned."""
+    while True:
+        result = await asyncio.to_thread(storage.evaluate_pending_outcomes)
+        if result.get("materialized"):
+            log.info("RESEARCH_OUTCOMES %s", json.dumps(result, separators=(",", ":")))
+        await asyncio.sleep(60)
+
+
 def restore_price_history() -> int:
     history = storage.load_price_history(14_400)
     restored = 0
@@ -178,12 +190,14 @@ async def lifespan(app: FastAPI):
     await engine.start()
     sampler = asyncio.create_task(snapshot_sampler())
     path_sampler = asyncio.create_task(price_path_sampler())
+    outcome_task = asyncio.create_task(outcome_sampler())
     try:
         async with mcp.session_manager.run():
             yield
     finally:
         sampler.cancel()
         path_sampler.cancel()
+        outcome_task.cancel()
         await engine.stop()
 
 
@@ -204,6 +218,7 @@ def health():
         "feeds": {s: x.connected for s, x in engine.states.items()},
         "mcp": "/mcp/",
         "research_event_thresholds": settings.research_threshold_list,
+        "price_path_retention_days": settings.research_price_path_retention_days,
     }
 
 
