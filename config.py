@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     snapshot_interval_seconds: int = 60
     round_trip_cost_pct: float = 0.12
 
+    sample_b_enabled: bool = False
+
     # Research-only validation controls. A high sample count is not enough for a
     # higher-timeframe model: the observed path must actually span the requested
     # clock time. 95% coverage allows normal scheduling jitter without letting a

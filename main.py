@@ -4,20 +4,23 @@ import json
 import logging
 import time
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from mcp.server.fastmcp import FastMCP
 
 try:
     from .config import settings
     from .engine import engine
     from .storage import storage
+    from .sample_b import SampleB
 except ImportError:  # Flat GitHub upload compatibility.
     from config import settings
     from engine import engine
     from storage import storage
+    from sample_b import SampleB
 
 
-APP_VERSION = "0.3.3-research"
+APP_VERSION = "0.3.4-research"
+sample_b = SampleB(storage)
 log = logging.getLogger("orderflow.snapshot")
 
 
@@ -38,6 +41,7 @@ def get_snapshot(symbol: str) -> dict:
 
 def research_status_payload() -> dict:
     return {
+        "sample_b": sample_b.status(),
         "database": storage.path,
         "observations": storage.status(),
         "price_path": storage.price_path_status(),
@@ -138,6 +142,7 @@ async def snapshot_sampler():
         for state in engine.states.values():
             snapshot = state.snapshot()
             created_events = await asyncio.to_thread(storage.insert, snapshot)
+            await asyncio.to_thread(sample_b.observe, snapshot)
             # Public market data only. This lets the connected Railway app provide
             # the latest snapshot when direct HTTP/MCP access is unavailable.
             log.info("ORDERFLOW_SNAPSHOT %s", json.dumps(snapshot, separators=(",", ":")))
@@ -153,6 +158,7 @@ async def price_path_sampler():
             (ts, symbol, float(state.price))
             for symbol, state in engine.states.items()
             if state.price is not None and state.connected
+            and state.last_update is not None and 0 <= ts - state.last_update <= 5
         ]
         if points:
             await asyncio.to_thread(storage.insert_price_points, points)
@@ -163,6 +169,7 @@ async def outcome_sampler():
     """Persist matured event outcomes before old 10-second path rows are pruned."""
     while True:
         result = await asyncio.to_thread(storage.evaluate_pending_outcomes)
+        await asyncio.to_thread(sample_b.evaluate)
         if result.get("materialized"):
             log.info("RESEARCH_OUTCOMES %s", json.dumps(result, separators=(",", ":")))
         await asyncio.sleep(60)
@@ -184,6 +191,9 @@ def restore_price_history() -> int:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     storage.init()
+    if settings.sample_b_enabled:
+        sample_b.init()
+        log.info("SAMPLE_B_STATUS %s", json.dumps(sample_b.status(), separators=(",", ":")))
     restored = await asyncio.to_thread(restore_price_history)
     if restored:
         log.info("RESEARCH_HISTORY_RESTORED points=%d", restored)
@@ -291,6 +301,16 @@ def threshold_sweep(symbol: str, horizon: int = 60, side: str = "long"):
         "thresholds": rows,
         "warning": "仅当样本数、周度稳定性和样本外结果都足够时，才考虑是否存在可交易优势。",
     }
+
+
+@app.get("/research/sample-b/status", dependencies=[Depends(authorize)])
+def sample_b_status():
+    return sample_b.status()
+
+
+@app.get("/research/sample-b/export", dependencies=[Depends(authorize)])
+def sample_b_export(after_id: int = Query(0, ge=0), limit: int = Query(500, ge=1, le=1000)):
+    return sample_b.export(after_id, limit)
 
 
 app.mount("/mcp", mcp_http_app)
