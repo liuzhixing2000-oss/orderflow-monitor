@@ -13,8 +13,10 @@ import websockets
 
 try:
     from .config import settings
+    from .liquidation_map import assess_squeeze_path, summarize_liquidation_map
 except ImportError:  # Flat GitHub upload compatibility.
     from config import settings
+    from liquidation_map import assess_squeeze_path, summarize_liquidation_map
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +39,9 @@ class MarketState:
     connected: bool = False
     last_update: float | None = None
     structure: dict[str, Any] = field(default_factory=dict)
+    liquidation_map: dict[str, Any] = field(default_factory=lambda: {
+        "status": "unavailable", "reason": "COINGLASS_API_KEY is not configured"
+    })
 
     def prune(self) -> None:
         cutoff = time.time() - settings.history_seconds
@@ -94,6 +99,11 @@ class MarketState:
         old = next((v for ts, v in self.oi if ts >= cutoff), self.oi[0][1])
         return pct_change(self.oi[-1][1], old)
 
+    def price_change(self, seconds: int) -> float | None:
+        cutoff = time.time() - seconds
+        old = next((row[4] for row in self.trades if row[0] >= cutoff), None)
+        return pct_change(self.price, old)
+
     def liquidation_window(self, seconds: int) -> dict[str, float]:
         cutoff = time.time() - seconds
         rows = [x for x in self.liquidations if x[0] >= cutoff]
@@ -137,6 +147,16 @@ class MarketState:
         short_score = min(100, 25 + short_score)
         gap = long_score-short_score
         stance = "买方占优" if gap >= 15 else "卖方占优" if gap <= -15 else "混合/不明确"
+        liquidations_5m = self.liquidation_window(300)
+        squeeze_path = assess_squeeze_path(
+            self.liquidation_map,
+            trade_flow=windows,
+            structure=self.structure,
+            order_book=book,
+            oi_change_15m=oic,
+            liquidations_5m=liquidations_5m,
+            price_change_5m_pct=self.price_change(300),
+        )
         return {
             "symbol": self.symbol, "timestamp": time.time(), "price": self.price,
             "feed_status": "live" if self.connected else "reconnecting",
@@ -144,8 +164,10 @@ class MarketState:
             "trade_flow": windows, "cvd_since_start_usd": round(cvd, 2),
             "open_interest": {"latest": self.oi[-1][1] if self.oi else None,
                               "change_5m_pct": self.oi_change(300), "change_15m_pct": oic},
-            "order_book": book, "liquidations_5m": self.liquidation_window(300),
+            "order_book": book, "liquidations_5m": liquidations_5m,
             "structure": self.structure,
+            "liquidation_map": self.liquidation_map,
+            "squeeze_path_assessment": squeeze_path,
             "assessment": {"long_score": long_score, "short_score": short_score,
                            "stance": stance, "evidence": signals,
                            "score_version": "0.2.0-research",
@@ -158,14 +180,21 @@ class OrderFlowEngine:
         self.states = {s: MarketState(s) for s in settings.symbol_list}
         self.started_at = time.time()
         self.task: asyncio.Task | None = None
+        self.structure_task: asyncio.Task | None = None
+        self.liquidation_map_task: asyncio.Task | None = None
 
     async def start(self) -> None:
         self.task = asyncio.create_task(self._run_forever())
-        asyncio.create_task(self._structure_loop())
+        self.structure_task = asyncio.create_task(self._structure_loop())
+        self.liquidation_map_task = asyncio.create_task(self._liquidation_map_loop())
 
     async def stop(self) -> None:
         if self.task:
             self.task.cancel()
+        if self.structure_task:
+            self.structure_task.cancel()
+        if self.liquidation_map_task:
+            self.liquidation_map_task.cancel()
 
     async def _run_forever(self) -> None:
         topics = [f"{t}.{s}" for s in self.states for t in ("publicTrade", "orderbook.50", "tickers", "allLiquidation")]
@@ -213,6 +242,42 @@ class OrderFlowEngine:
                     except Exception as exc:
                         log.warning("Structure fetch failed for %s: %s", symbol, exc)
             await asyncio.sleep(300)
+
+    async def _liquidation_map_loop(self) -> None:
+        if not settings.coinglass_api_key:
+            log.warning("CoinGlass liquidation map disabled: COINGLASS_API_KEY is not configured")
+            return
+        while True:
+            if not any(state.price for state in self.states.values()):
+                await asyncio.sleep(5)
+                continue
+            async with httpx.AsyncClient(timeout=20) as client:
+                for symbol, state in self.states.items():
+                    if not state.price:
+                        continue
+                    try:
+                        coin = symbol.removesuffix("USDT")
+                        response = await client.get(
+                            f"{settings.coinglass_api_url}/api/futures/liquidation/aggregated-map",
+                            params={"symbol": coin, "range": settings.liquidation_map_range},
+                            headers={"CG-API-KEY": settings.coinglass_api_key},
+                        )
+                        response.raise_for_status()
+                        state.liquidation_map = summarize_liquidation_map(
+                            response.json(),
+                            state.price,
+                            max_distance_pct=settings.liquidation_map_max_distance_pct,
+                            cluster_band_pct=settings.liquidation_map_cluster_band_pct,
+                        )
+                    except Exception as exc:
+                        previous = state.liquidation_map
+                        state.liquidation_map = {
+                            "status": "stale" if previous.get("status") == "live" else "unavailable",
+                            "reason": str(exc),
+                            "last_good": previous if previous.get("status") == "live" else None,
+                        }
+                        log.warning("Liquidation map fetch failed for %s: %s", symbol, exc)
+            await asyncio.sleep(settings.liquidation_map_refresh_seconds)
 
     async def _fetch_structure(self, client: httpx.AsyncClient, symbol: str) -> dict[str, Any]:
         out = {}
