@@ -12,6 +12,12 @@ class Settings(BaseSettings):
     data_path: str = "/data/orderflow.db"
     snapshot_interval_seconds: int = 60
     round_trip_cost_pct: float = 0.12
+    coinglass_api_key: str = ""
+    coinglass_api_url: str = "https://open-api-v4.coinglass.com"
+    liquidation_map_range: str = "1d"
+    liquidation_map_refresh_seconds: int = 300
+    liquidation_map_max_distance_pct: float = 8.0
+    liquidation_map_cluster_band_pct: float = 0.25
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property
