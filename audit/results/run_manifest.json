@@ -1,0 +1,13 @@
+{
+  "dataset_sha256": "6e1cf95c85c1a14d1305353e1a5e92748c859991af74f6ff31dd38ed6475d1f3",
+  "source_sha256": {
+    "audit/run_audit.py": "7706f7320f720f2b84ab9c13a0a22c666fe638c42e7c565d34b7ccec1537199d",
+    "audit/PROTOCOL.md": "2c7ba2041f03ad673674608292827595e387f15cbaec987373c36f4fad26a2fc",
+    "audit/vendor/legacy_replay_backtest.py": "ab6c612c7f5a8b583fd4984ceccc3782528866d6ee2faa6c8cfdec77252695d4",
+    "research_models.py": "ad92cdf9e2595578e4830e99752c7e90bd66399d08d6f59c346d4bbf87274d4d"
+  },
+  "reconciliation_cells": 120,
+  "reconciliation_agree": 96,
+  "primary_sample": "RECOVERED_SUBSET_OF_EXPLORATORY_A",
+  "confirmation": false
+}

@@ -1,0 +1,97 @@
+{
+  "dataset_name": "Sample A log-recovered subset",
+  "full_sqlite_sample_reproduced": false,
+  "canonical_jsonl_sha256": "6e1cf95c85c1a14d1305353e1a5e92748c859991af74f6ff31dd38ed6475d1f3",
+  "original_reported": {
+    "BTCUSDT": {
+      "symbol": "BTCUSDT",
+      "rows": 5510,
+      "first_utc": "2026-09-03T02:27:29.793554+00:00",
+      "last_utc": "2026-09-07T00:57:26.503166+00:00",
+      "span_hours": 94.5,
+      "eligible_rows": 5284,
+      "regimes": {
+        "TRANSITION": 1157,
+        "TREND_UP": 534,
+        "RANGE": 3361,
+        "TREND_DOWN": 232
+      },
+      "max_score": {
+        "long": 87,
+        "short": 71
+      },
+      "events": 37,
+      "book_weight": 0,
+      "cost_pct": 0.12
+    },
+    "ETHUSDT": {
+      "symbol": "ETHUSDT",
+      "rows": 5510,
+      "first_utc": "2026-09-03T02:27:29.800487+00:00",
+      "last_utc": "2026-09-07T00:57:26.512172+00:00",
+      "span_hours": 94.5,
+      "eligible_rows": 5284,
+      "regimes": {
+        "RANGE": 3083,
+        "TRANSITION": 1306,
+        "TREND_UP": 682,
+        "TREND_DOWN": 213
+      },
+      "max_score": {
+        "long": 87,
+        "short": 71
+      },
+      "events": 39,
+      "book_weight": 0,
+      "cost_pct": 0.12
+    },
+    "SOLUSDT": {
+      "symbol": "SOLUSDT",
+      "rows": 5510,
+      "first_utc": "2026-09-03T02:27:29.804447+00:00",
+      "last_utc": "2026-09-07T00:57:26.518559+00:00",
+      "span_hours": 94.5,
+      "eligible_rows": 5284,
+      "regimes": {
+        "RANGE": 2973,
+        "TRANSITION": 1437,
+        "TREND_UP": 617,
+        "TREND_DOWN": 257
+      },
+      "max_score": {
+        "long": 87,
+        "short": 87
+      },
+      "events": 47,
+      "book_weight": 0,
+      "cost_pct": 0.12
+    }
+  },
+  "conflicting_duplicates": 0,
+  "recovered": {
+    "BTCUSDT": {
+      "rows": 5447,
+      "first_ts": 1788406451.515169,
+      "last_ts": 1788742646.503166,
+      "max_gap_seconds": 125.40226721763611,
+      "gaps_over_90s": 1,
+      "fraction_intervals_over_60s": 0.9998163789937569
+    },
+    "ETHUSDT": {
+      "rows": 5447,
+      "first_ts": 1788406451.5157506,
+      "last_ts": 1788742646.5121717,
+      "max_gap_seconds": 125.36236333847046,
+      "gaps_over_90s": 1,
+      "fraction_intervals_over_60s": 0.9998163789937569
+    },
+    "SOLUSDT": {
+      "rows": 5447,
+      "first_ts": 1788406451.516337,
+      "last_ts": 1788742646.5185585,
+      "max_gap_seconds": 125.33744764328003,
+      "gaps_over_90s": 1,
+      "fraction_intervals_over_60s": 0.9998163789937569
+    }
+  }
+}
