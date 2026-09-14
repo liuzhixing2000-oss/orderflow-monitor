@@ -178,9 +178,12 @@ class SampleB:
         if not self.started:
             return {"enabled": False, "state": self.blocked or "NOT_STARTED"}
         now = time.time() if now is None else now
-        with self.storage.connect() as db:
-            cohort = dict(db.execute("SELECT * FROM sample_b_cohort WHERE id=?", (COHORT,)).fetchone())
-            rows = db.execute("SELECT primary_event,outcome,COUNT(*) n FROM sample_b_observations WHERE cohort=? GROUP BY primary_event,outcome IS NULL,CASE WHEN outcome IS NOT NULL THEN json_extract(outcome,'$.quality_ok') END", (COHORT,)).fetchall()
+        try:
+            with self.storage.connect() as db:
+                cohort = dict(db.execute("SELECT * FROM sample_b_cohort WHERE id=?", (COHORT,)).fetchone())
+                rows = db.execute("SELECT primary_event,outcome,COUNT(*) n FROM sample_b_observations WHERE cohort=? GROUP BY primary_event,outcome IS NULL,CASE WHEN outcome IS NOT NULL THEN json_extract(outcome,'$.quality_ok') END", (COHORT,)).fetchall()
+                bounds = db.execute("SELECT MIN(ts),MAX(ts) FROM sample_b_observations WHERE cohort=? AND eligible=1", (COHORT,)).fetchone()
+                reasons = {r[0]: r[1] for r in db.execute("SELECT reason,COUNT(*) FROM sample_b_observations WHERE cohort=? GROUP BY reason", (COHORT,))}
             counts = {"observations": 0, "primary_events": 0, "primary_mature_quality_ok": 0, "primary_mature_excluded": 0}
             for row in rows:
                 counts["observations"] += row["n"]
@@ -188,8 +191,10 @@ class SampleB:
                     counts["primary_events"] += row["n"]
                     if row["outcome"]:
                         counts["primary_mature_quality_ok" if json.loads(row["outcome"])["quality_ok"] else "primary_mature_excluded"] += row["n"]
-            bounds = db.execute("SELECT MIN(ts),MAX(ts) FROM sample_b_observations WHERE cohort=? AND eligible=1", (COHORT,)).fetchone()
-            reasons = {r[0]: r[1] for r in db.execute("SELECT reason,COUNT(*) FROM sample_b_observations WHERE cohort=? GROUP BY reason", (COHORT,))}
+        except Exception as exc:
+            return {"enabled": True, "state": "STATUS_READ_RETRY", "cohort": COHORT,
+                    "error": type(exc).__name__, "minimum_evidence_gate_met": False,
+                    "edge_verdict": "NOT_ESTABLISHED"}
         # Count complete UTC days after first eligibility, through actual observations;
         # a stopped collector does not accrue days merely because wall time passes.
         days = max(0, int(bounds[1]//86400) - math.ceil(bounds[0]/86400)) if bounds[0] is not None else 0
