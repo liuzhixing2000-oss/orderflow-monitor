@@ -1,4 +1,4 @@
-# BTC / ETH / SOL Order Flow Monitor v0.3
+# BTC / ETH / SOL Order Flow Monitor v0.4
 
 一个独立、只读的 Bybit USDT 永续订单流采集器和 ChatGPT MCP 数据源。它不会下单，也不会发送 Telegram 消息。
 
@@ -10,10 +10,11 @@
 https://orderflow-monitor-production.up.railway.app/mcp/
 ```
 
-提供四个只读工具：
+提供五个只读工具：
 
 - `get_market_snapshot(symbol)`：读取 BTC、ETH 或 SOL 的最新订单流
 - `get_all_market_snapshots()`：读取三个品种的最新状态
+- `get_liquidation_squeeze_context(symbol)`：读取清算密集区、到达可能性与挤压阶段
 - `get_research_status()`：读取样本积累情况
 - `get_score_bucket_results(symbol, horizon_minutes, side)`：读取评分分组前向结果
 
@@ -28,6 +29,8 @@ MCP没有下单、改单、撤单或交易所账户工具。当前版本的MCP�
 - 价格上下 0.1% 和 0.5% 的订单簿失衡
 - 5m 多空爆仓额、大额主动成交笔数
 - 1H / 4H EMA20、EMA50 与趋势背景
+- 可选 CoinGlass 1日聚合清算地图：上下方关键清算区、距离、规模与杠杆构成
+- 结合趋势、Delta、OI、盘口和实际清算评估向上逼空/向下多杀多的推进状态
 - 独立 LONG_SCORE / SHORT_SCORE（研究分数，不触发交易）
 - 每分钟保存快照，并统计15/30/60/240分钟后的扣费收益
 
@@ -58,6 +61,9 @@ uvicorn main:app --host 0.0.0.0 --port $PORT
 - 可选 `LARGE_TRADE_USD=250000`
 - 可选 `ROUND_TRIP_COST_PCT=0.12`
 - 可选 `API_KEY`（仅保护普通HTTP接口）
+- `COINGLASS_API_KEY`（启用清算地图；官方 aggregated-map 接口需要 Professional 或 Enterprise API）
+- 可选 `LIQUIDATION_MAP_RANGE=1d`
+- 可选 `LIQUIDATION_MAP_REFRESH_SECONDS=300`
 
 ## 限制
 
@@ -66,3 +72,5 @@ uvicorn main:app --host 0.0.0.0 --port $PORT
 - CVD和实时滚动窗口会随服务重启重新开始。
 - 分钟快照高度相关；正式回测需使用阈值穿越、冷却期和样本外数据。
 - MCP只解决ChatGPT读取问题，不会自动提高判断准确率。
+- `upside_reachability_score` / `downside_reachability_score` 是研究启发式分数，不是经过校准的概率。
+- 没有 `COINGLASS_API_KEY` 时订单流继续正常运行，清算地图会明确返回 unavailable。

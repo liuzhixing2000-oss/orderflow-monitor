@@ -63,6 +63,25 @@ def get_all_market_snapshots() -> dict:
 
 
 @mcp.tool()
+def get_liquidation_squeeze_context(symbol: str) -> dict:
+    """Return nearby liquidation clusters and whether live order flow supports reaching them."""
+    snapshot = get_snapshot(symbol)
+    return {
+        "symbol": snapshot["symbol"],
+        "price": snapshot["price"],
+        "liquidation_map": snapshot["liquidation_map"],
+        "squeeze_path_assessment": snapshot["squeeze_path_assessment"],
+        "live_confirmation": {
+            "trade_flow": snapshot["trade_flow"],
+            "open_interest": snapshot["open_interest"],
+            "liquidations_5m": snapshot["liquidations_5m"],
+            "order_book": snapshot["order_book"],
+            "structure": snapshot["structure"],
+        },
+    }
+
+
+@mcp.tool()
 def get_research_status() -> dict:
     """Return stored observation counts and collection date ranges."""
     return {
@@ -123,7 +142,7 @@ async def lifespan(app: FastAPI):
         await engine.stop()
 
 
-app = FastAPI(title="Crypto Order Flow Monitor", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Crypto Order Flow Monitor", version="0.4.0", lifespan=lifespan)
 
 
 def authorize(x_api_key: str | None = Header(default=None)) -> None:
@@ -135,7 +154,8 @@ def authorize(x_api_key: str | None = Header(default=None)) -> None:
 def health():
     return {
         "ok": True,
-        "version": "0.3.0",
+        "version": "0.4.0",
+        "liquidation_map": "enabled" if settings.coinglass_api_key else "needs_COINGLASS_API_KEY",
         "symbols": settings.symbol_list,
         "feeds": {s: x.connected for s, x in engine.states.items()},
         "mcp": "/mcp/",
