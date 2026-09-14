@@ -29,12 +29,19 @@ class Storage:
             self.path = "orderflow.db"
 
     def connect(self) -> sqlite3.Connection:
-        db = sqlite3.connect(self.path, timeout=10)
+        # WAL lets the read-only status/export endpoints proceed while the
+        # minute sampler commits a short observation transaction.  The bounded
+        # busy timeout prevents an API request from hanging behind a writer.
+        db = sqlite3.connect(self.path, timeout=2)
         db.row_factory = sqlite3.Row
+        db.execute("PRAGMA busy_timeout=2000")
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA synchronous=NORMAL")
         return db
 
     def init(self) -> None:
         with self.connect() as db:
+            db.execute("PRAGMA journal_mode=WAL")
             db.execute("""
                 CREATE TABLE IF NOT EXISTS snapshots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
