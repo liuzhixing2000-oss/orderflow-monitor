@@ -14,9 +14,11 @@ import websockets
 try:
     from .config import settings
     from .liquidation_map import assess_squeeze_path, summarize_liquidation_map
+    from .liquidations import LiquidationAggregator, BinanceUSDMLiquidationStream, classify_liquidation_regime
 except ImportError:  # Flat GitHub upload compatibility.
     from config import settings
     from liquidation_map import assess_squeeze_path, summarize_liquidation_map
+    from liquidations import LiquidationAggregator, BinanceUSDMLiquidationStream, classify_liquidation_regime
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +34,8 @@ class MarketState:
     symbol: str
     trades: deque = field(default_factory=deque)  # (ts, signed_usd, usd, side, price)
     oi: deque = field(default_factory=deque)      # (ts, open_interest)
-    liquidations: deque = field(default_factory=deque)  # (ts, side, usd)
+    liquidations: deque = field(default_factory=deque)  # (ts, side, usd) — compat only
+    liquidation_aggregator: LiquidationAggregator = field(default_factory=lambda: LiquidationAggregator(""))
     bids: dict[float, float] = field(default_factory=dict)
     asks: dict[float, float] = field(default_factory=dict)
     price: float | None = None
@@ -43,11 +46,16 @@ class MarketState:
         "status": "unavailable", "reason": "COINGLASS_API_KEY is not configured"
     })
 
+    def __post_init__(self):
+        if not self.liquidation_aggregator.symbol:
+            self.liquidation_aggregator.symbol = self.symbol
+
     def prune(self) -> None:
         cutoff = time.time() - settings.history_seconds
         for series in (self.trades, self.oi, self.liquidations):
             while series and series[0][0] < cutoff:
                 series.popleft()
+        self.liquidation_aggregator.prune(settings.history_seconds)
 
     def add_trade(self, ts: float, side: str, price: float, qty: float) -> None:
         usd = price * qty
@@ -84,13 +92,21 @@ class MarketState:
 
     def book_imbalance(self, band: float) -> dict[str, Any]:
         if not self.price:
-            return {"imbalance": None, "bid_usd": 0, "ask_usd": 0}
+            return {"imbalance": None, "bid_usd": 0, "ask_usd": 0, "bid_shares": 0, "ask_shares": 0, "imbalance_shares": None}
         lo, hi = self.price * (1-band), self.price * (1+band)
         bid = sum(p*q for p, q in self.bids.items() if p >= lo)
         ask = sum(p*q for p, q in self.asks.items() if p <= hi)
+        bid_qty = sum(q for p, q in self.bids.items() if p >= lo)
+        ask_qty = sum(q for p, q in self.asks.items() if p <= hi)
         denom = bid + ask
-        return {"imbalance": round((bid-ask)/denom, 4) if denom else None,
-                "bid_usd": round(bid, 2), "ask_usd": round(ask, 2)}
+        qty_denom = bid_qty + ask_qty
+        return {
+            "imbalance": round((bid-ask)/denom, 4) if denom else None,
+            "bid_usd": round(bid, 2), "ask_usd": round(ask, 2),
+            "bid_shares": round(bid_qty, 4),
+            "ask_shares": round(ask_qty, 4),
+            "imbalance_shares": round((bid_qty-ask_qty)/qty_denom, 4) if qty_denom else None,
+        }
 
     def oi_change(self, seconds: int) -> float | None:
         if not self.oi:
@@ -104,15 +120,17 @@ class MarketState:
         old = next((row[4] for row in self.trades if row[0] >= cutoff), None)
         return pct_change(self.price, old)
 
-    def liquidation_window(self, seconds: int) -> dict[str, float]:
-        cutoff = time.time() - seconds
-        rows = [x for x in self.liquidations if x[0] >= cutoff]
-        # Bybit reports liquidation order side: Sell closes longs, Buy closes shorts.
-        return {"long_usd": round(sum(x[2] for x in rows if x[1].lower()=="sell"), 2),
-                "short_usd": round(sum(x[2] for x in rows if x[1].lower()=="buy"), 2)}
+    def liquidation_window(self, seconds: int) -> dict[str, Any]:
+        """Aggregate liquidations across all exchanges over time window."""
+        agg = self.liquidation_aggregator.window(seconds)
+        return {
+            "total_long_usd": agg["total_long_usd"],
+            "total_short_usd": agg["total_short_usd"],
+            "by_exchange": agg["by_exchange"],
+        }
 
     def snapshot(self) -> dict[str, Any]:
-        windows = {k: self.window(v) for k, v in {"1m":60,"5m":300,"15m":900}.items()}
+        windows = {k: self.window(v) for k, v in {"1m": 60, "5m": 300, "15m": 900}.items()}
         cvd = sum(x[1] for x in self.trades)
         book = {"0.1pct": self.book_imbalance(.001), "0.5pct": self.book_imbalance(.005)}
         signals, long_score, short_score = [], 0, 0
@@ -147,14 +165,29 @@ class MarketState:
         short_score = min(100, 25 + short_score)
         gap = long_score-short_score
         stance = "买方占优" if gap >= 15 else "卖方占优" if gap <= -15 else "混合/不明确"
+        
+        # Liquidations aggregated across exchanges
+        liquidations_1m = self.liquidation_window(60)
         liquidations_5m = self.liquidation_window(300)
+        liquidations_15m = self.liquidation_window(900)
+        
+        # Liquidation regime classification (15m window)
+        regime = classify_liquidation_regime(
+            price_change_15m_pct=self.price_change(900),
+            oi_change_15m_pct=oic,
+            trade_delta_15m_usd=windows["15m"]["delta_usd"],
+            liquidations_15m={"long_usd": liquidations_15m["total_long_usd"], 
+                             "short_usd": liquidations_15m["total_short_usd"]},
+        )
+        
         squeeze_path = assess_squeeze_path(
             self.liquidation_map,
             trade_flow=windows,
             structure=self.structure,
             order_book=book,
             oi_change_15m=oic,
-            liquidations_5m=liquidations_5m,
+            liquidations_5m={"long_usd": liquidations_5m["total_long_usd"], 
+                            "short_usd": liquidations_5m["total_short_usd"]},
             price_change_5m_pct=self.price_change(300),
         )
         return {
@@ -164,13 +197,21 @@ class MarketState:
             "trade_flow": windows, "cvd_since_start_usd": round(cvd, 2),
             "open_interest": {"latest": self.oi[-1][1] if self.oi else None,
                               "change_5m_pct": self.oi_change(300), "change_15m_pct": oic},
-            "order_book": book, "liquidations_5m": liquidations_5m,
+            "order_book": book,
+            "liquidations": {
+                "1m": liquidations_1m,
+                "5m": liquidations_5m,
+                "15m": liquidations_15m,
+                "1h": self.liquidation_window(3600),
+                "4h": self.liquidation_window(14400),
+            },
+            "liquidation_regime": regime,
             "structure": self.structure,
             "liquidation_map": self.liquidation_map,
             "squeeze_path_assessment": squeeze_path,
             "assessment": {"long_score": long_score, "short_score": short_score,
                            "stance": stance, "evidence": signals,
-                           "score_version": "0.2.0-research",
+                           "score_version": "0.3.0-liquidation-aggregation",
                            "warning": "这是实时状态摘要，不是自动交易信号。"},
         }
 
@@ -182,11 +223,19 @@ class OrderFlowEngine:
         self.task: asyncio.Task | None = None
         self.structure_task: asyncio.Task | None = None
         self.liquidation_map_task: asyncio.Task | None = None
+        self.binance_stream: BinanceUSDMLiquidationStream | None = None
 
     async def start(self) -> None:
         self.task = asyncio.create_task(self._run_forever())
         self.structure_task = asyncio.create_task(self._structure_loop())
         self.liquidation_map_task = asyncio.create_task(self._liquidation_map_loop())
+        
+        # Start isolated Binance stream (independent, won't break if fails)
+        self.binance_stream = BinanceUSDMLiquidationStream(
+            settings.symbol_list,
+            callback=self._on_binance_liquidation
+        )
+        await self.binance_stream.start()
 
     async def stop(self) -> None:
         if self.task:
@@ -195,6 +244,15 @@ class OrderFlowEngine:
             self.structure_task.cancel()
         if self.liquidation_map_task:
             self.liquidation_map_task.cancel()
+        if self.binance_stream:
+            await self.binance_stream.stop()
+
+    def _on_binance_liquidation(self, symbol: str, side: str, usd: float) -> None:
+        """Callback from Binance stream to record liquidations."""
+        state = self.states.get(symbol)
+        if state:
+            state.liquidation_aggregator.add_liquidation("binance", time.time(), side, usd)
+            log.debug("Binance liquidation: %s %s $%.2f", symbol, side, usd)
 
     async def _run_forever(self) -> None:
         topics = [f"{t}.{s}" for s in self.states for t in ("publicTrade", "orderbook.50", "tickers", "allLiquidation")]
@@ -230,7 +288,12 @@ class OrderFlowEngine:
             state.last_update = now; state.prune()
         elif topic.startswith("allLiquidation"):
             for x in (data if isinstance(data, list) else [data]):
-                try: state.liquidations.append((now, x["S"], float(x["p"])*float(x["v"])))
+                try:
+                    # Bybit allLiquidation: S is order side (Sell closes longs, Buy closes shorts)
+                    side = "long" if x["S"] == "Sell" else "short"
+                    usd = float(x["p"])*float(x["v"])
+                    state.liquidation_aggregator.add_liquidation("bybit", now, side, usd)
+                    state.liquidations.append((now, x["S"], usd))  # Keep for backward compat
                 except (KeyError, ValueError): pass
 
     async def _structure_loop(self) -> None:
@@ -299,3 +362,4 @@ class OrderFlowEngine:
 
 
 engine = OrderFlowEngine()
+

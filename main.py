@@ -63,6 +63,19 @@ def get_all_market_snapshots() -> dict:
 
 
 @mcp.tool()
+def get_liquidation_status(symbol: str) -> dict:
+    """Return realized liquidation aggregates and regime classification for a symbol."""
+    snapshot = get_snapshot(symbol)
+    return {
+        "symbol": snapshot["symbol"],
+        "price": snapshot["price"],
+        "liquidations": snapshot["liquidations"],
+        "liquidation_regime": snapshot["liquidation_regime"],
+        "sources": ["bybit_allLiquidation", "binance_usdm_public_forceorder"],
+    }
+
+
+@mcp.tool()
 def get_liquidation_squeeze_context(symbol: str) -> dict:
     """Return nearby liquidation clusters and whether live order flow supports reaching them."""
     snapshot = get_snapshot(symbol)
@@ -70,11 +83,12 @@ def get_liquidation_squeeze_context(symbol: str) -> dict:
         "symbol": snapshot["symbol"],
         "price": snapshot["price"],
         "liquidation_map": snapshot["liquidation_map"],
+        "liquidations": snapshot["liquidations"],
+        "liquidation_regime": snapshot["liquidation_regime"],
         "squeeze_path_assessment": snapshot["squeeze_path_assessment"],
         "live_confirmation": {
             "trade_flow": snapshot["trade_flow"],
             "open_interest": snapshot["open_interest"],
-            "liquidations_5m": snapshot["liquidations_5m"],
             "order_book": snapshot["order_book"],
             "structure": snapshot["structure"],
         },
@@ -142,7 +156,7 @@ async def lifespan(app: FastAPI):
         await engine.stop()
 
 
-app = FastAPI(title="Crypto Order Flow Monitor", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="Crypto Order Flow Monitor", version="0.5.0", lifespan=lifespan)
 
 
 def authorize(x_api_key: str | None = Header(default=None)) -> None:
@@ -154,8 +168,12 @@ def authorize(x_api_key: str | None = Header(default=None)) -> None:
 def health():
     return {
         "ok": True,
-        "version": "0.4.0",
+        "version": "0.5.0",
         "liquidation_map": "enabled" if settings.coinglass_api_key else "needs_COINGLASS_API_KEY",
+        "liquidations": {
+            "bybit": "enabled",
+            "binance": "enabled" if engine.binance_stream and engine.binance_stream.connected else "connecting",
+        },
         "symbols": settings.symbol_list,
         "feeds": {s: x.connected for s, x in engine.states.items()},
         "mcp": "/mcp/",
@@ -209,3 +227,4 @@ def score_buckets(symbol: str, horizon: int = 60, side: str = "long"):
 
 
 app.mount("/mcp", mcp_http_app)
+
