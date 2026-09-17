@@ -63,6 +63,20 @@ def get_all_market_snapshots() -> dict:
 
 
 @mcp.tool()
+def get_liquidation_status(symbol: str) -> dict:
+    """Return realized liquidation volumes and regime classification for a symbol."""
+    snapshot = get_snapshot(symbol)
+    return {
+        "symbol": snapshot["symbol"],
+        "timestamp": snapshot["timestamp"],
+        "price": snapshot["price"],
+        "liquidations": snapshot["liquidations"],
+        "liquidation_regime": snapshot["liquidation_regime"],
+        "note": "Liquidation regime is research-only; confidence < 100 means insufficient evidence.",
+    }
+
+
+@mcp.tool()
 def get_liquidation_squeeze_context(symbol: str) -> dict:
     """Return nearby liquidation clusters and whether live order flow supports reaching them."""
     snapshot = get_snapshot(symbol)
@@ -71,10 +85,11 @@ def get_liquidation_squeeze_context(symbol: str) -> dict:
         "price": snapshot["price"],
         "liquidation_map": snapshot["liquidation_map"],
         "squeeze_path_assessment": snapshot["squeeze_path_assessment"],
+        "liquidations": snapshot["liquidations"],
+        "liquidation_regime": snapshot["liquidation_regime"],
         "live_confirmation": {
             "trade_flow": snapshot["trade_flow"],
             "open_interest": snapshot["open_interest"],
-            "liquidations_5m": snapshot["liquidations_5m"],
             "order_book": snapshot["order_book"],
             "structure": snapshot["structure"],
         },
@@ -142,7 +157,7 @@ async def lifespan(app: FastAPI):
         await engine.stop()
 
 
-app = FastAPI(title="Crypto Order Flow Monitor", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="Crypto Order Flow Monitor", version="0.5.0", lifespan=lifespan)
 
 
 def authorize(x_api_key: str | None = Header(default=None)) -> None:
@@ -152,12 +167,14 @@ def authorize(x_api_key: str | None = Header(default=None)) -> None:
 
 @app.get("/health")
 def health():
+    binance_status = "live" if engine.binance_stream and engine.binance_stream.connected else "disconnected"
     return {
         "ok": True,
-        "version": "0.4.0",
+        "version": "0.5.0",
         "liquidation_map": "enabled" if settings.coinglass_api_key else "needs_COINGLASS_API_KEY",
         "symbols": settings.symbol_list,
         "feeds": {s: x.connected for s, x in engine.states.items()},
+        "binance_liquidation_stream": binance_status,
         "mcp": "/mcp/",
     }
 
@@ -178,6 +195,21 @@ def snapshot(symbol: str):
 @app.get("/snapshot", dependencies=[Depends(authorize)])
 def all_snapshots():
     return {s: state.snapshot() for s, state in engine.states.items()}
+
+
+@app.get("/liquidations/{symbol}", dependencies=[Depends(authorize)])
+def liquidations(symbol: str):
+    try:
+        snapshot = get_snapshot(symbol)
+        return {
+            "symbol": snapshot["symbol"],
+            "timestamp": snapshot["timestamp"],
+            "price": snapshot["price"],
+            "liquidations": snapshot["liquidations"],
+            "liquidation_regime": snapshot["liquidation_regime"],
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/research/status", dependencies=[Depends(authorize)])
@@ -209,3 +241,4 @@ def score_buckets(symbol: str, horizon: int = 60, side: str = "long"):
 
 
 app.mount("/mcp", mcp_http_app)
+

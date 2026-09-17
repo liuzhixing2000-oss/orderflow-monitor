@@ -18,6 +18,7 @@ sys.modules["config"] = fake_config
 
 from engine import MarketState  # noqa: E402
 from liquidation_map import assess_squeeze_path, summarize_liquidation_map  # noqa: E402
+from liquidations import LiquidationAggregator, classify_liquidation_regime  # noqa: E402
 
 
 class EngineTest(unittest.TestCase):
@@ -33,6 +34,50 @@ class EngineTest(unittest.TestCase):
         s.update_book("snapshot", [["99", "10"]], [["101", "5"]])
         s.price = 100
         self.assertGreater(s.book_imbalance(.02)["imbalance"], 0)
+        self.assertGreater(s.book_imbalance(.02)["imbalance_shares"], 0)
+
+    def test_liquidation_aggregator(self):
+        agg = LiquidationAggregator("BTCUSDT")
+        import time
+        now = time.time()
+        agg.add_liquidation("bybit", now, "long", 100000)
+        agg.add_liquidation("binance", now, "short", 50000)
+        
+        window = agg.window(60)
+        self.assertEqual(window["total_long_usd"], 100000)
+        self.assertEqual(window["total_short_usd"], 50000)
+        self.assertEqual(window["by_exchange"]["bybit"]["long_usd"], 100000)
+        self.assertEqual(window["by_exchange"]["binance"]["short_usd"], 50000)
+
+    def test_liquidation_regime_long_deleveraging(self):
+        regime = classify_liquidation_regime(
+            price_change_15m_pct=-1.5,
+            oi_change_15m_pct=-12.0,
+            trade_delta_15m_usd=-50000,
+            liquidations_15m={"long_usd": 500000, "short_usd": 50000},
+        )
+        self.assertEqual(regime["regime"], "long_deleveraging")
+        self.assertGreater(regime["confidence"], 50)
+
+    def test_liquidation_regime_short_squeeze(self):
+        regime = classify_liquidation_regime(
+            price_change_15m_pct=1.2,
+            oi_change_15m_pct=2.0,
+            trade_delta_15m_usd=100000,
+            liquidations_15m={"long_usd": 50000, "short_usd": 400000},
+        )
+        self.assertEqual(regime["regime"], "short_squeeze")
+        self.assertGreater(regime["confidence"], 50)
+
+    def test_liquidation_regime_fresh_position_building(self):
+        regime = classify_liquidation_regime(
+            price_change_15m_pct=0.8,
+            oi_change_15m_pct=15.0,
+            trade_delta_15m_usd=200000,
+            liquidations_15m={"long_usd": 30000, "short_usd": 350000},
+        )
+        self.assertEqual(regime["regime"], "fresh_position_building")
+        self.assertGreater(regime["confidence"], 40)
 
     def test_liquidation_map_and_squeeze_context(self):
         payload = {"code": "0", "data": {"data": {
@@ -60,3 +105,4 @@ class EngineTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
