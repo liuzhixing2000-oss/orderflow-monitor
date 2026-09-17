@@ -1,6 +1,7 @@
 import unittest
 import sys
 import types
+import time
 
 # Keep the unit test runnable before deployment dependencies are installed.
 sys.modules.setdefault("httpx", types.ModuleType("httpx"))
@@ -24,7 +25,6 @@ from liquidations import LiquidationAggregator, classify_liquidation_regime  # n
 class EngineTest(unittest.TestCase):
     def test_trade_delta_and_book(self):
         s = MarketState("BTCUSDT")
-        import time
         now = time.time()
         s.add_trade(now, "Buy", 100, 2)
         s.add_trade(now, "Sell", 100, 1)
@@ -34,50 +34,56 @@ class EngineTest(unittest.TestCase):
         s.update_book("snapshot", [["99", "10"]], [["101", "5"]])
         s.price = 100
         self.assertGreater(s.book_imbalance(.02)["imbalance"], 0)
-        self.assertGreater(s.book_imbalance(.02)["imbalance_shares"], 0)
+        # Check new fields
+        self.assertEqual(s.book_imbalance(.02)["bid_shares"], 10)
+        self.assertEqual(s.book_imbalance(.02)["ask_shares"], 5)
+        self.assertIsNotNone(s.book_imbalance(.02)["imbalance_shares"])
 
     def test_liquidation_aggregator(self):
         agg = LiquidationAggregator("BTCUSDT")
-        import time
         now = time.time()
-        agg.add_liquidation("bybit", now, "long", 100000)
-        agg.add_liquidation("binance", now, "short", 50000)
+        agg.add_liquidation("bybit", now, "long", 100_000)
+        agg.add_liquidation("bybit", now, "short", 50_000)
+        agg.add_liquidation("binance", now, "short", 30_000)
         
         window = agg.window(60)
-        self.assertEqual(window["total_long_usd"], 100000)
-        self.assertEqual(window["total_short_usd"], 50000)
-        self.assertEqual(window["by_exchange"]["bybit"]["long_usd"], 100000)
-        self.assertEqual(window["by_exchange"]["binance"]["short_usd"], 50000)
+        self.assertEqual(window["total_long_usd"], 100_000)
+        self.assertEqual(window["total_short_usd"], 80_000)
+        self.assertEqual(window["by_exchange"]["bybit"]["long_usd"], 100_000)
+        self.assertEqual(window["by_exchange"]["bybit"]["short_usd"], 50_000)
+        self.assertEqual(window["by_exchange"]["binance"]["long_usd"], 0)
+        self.assertEqual(window["by_exchange"]["binance"]["short_usd"], 30_000)
 
     def test_liquidation_regime_long_deleveraging(self):
         regime = classify_liquidation_regime(
             price_change_15m_pct=-1.5,
-            oi_change_15m_pct=-12.0,
-            trade_delta_15m_usd=-50000,
-            liquidations_15m={"long_usd": 500000, "short_usd": 50000},
+            oi_change_15m_pct=-15.0,
+            trade_delta_15m_usd=-50_000,
+            liquidations_15m={"long_usd": 500_000, "short_usd": 0},
         )
         self.assertEqual(regime["regime"], "long_deleveraging")
-        self.assertGreater(regime["confidence"], 50)
+        self.assertGreater(regime["confidence"], 70)
+        self.assertIn("Long liquidations", str(regime["evidence"]))
 
     def test_liquidation_regime_short_squeeze(self):
         regime = classify_liquidation_regime(
             price_change_15m_pct=1.2,
             oi_change_15m_pct=2.0,
-            trade_delta_15m_usd=100000,
-            liquidations_15m={"long_usd": 50000, "short_usd": 400000},
+            trade_delta_15m_usd=100_000,
+            liquidations_15m={"long_usd": 0, "short_usd": 300_000},
         )
         self.assertEqual(regime["regime"], "short_squeeze")
-        self.assertGreater(regime["confidence"], 50)
+        self.assertGreater(regime["confidence"], 60)
 
     def test_liquidation_regime_fresh_position_building(self):
         regime = classify_liquidation_regime(
             price_change_15m_pct=0.8,
-            oi_change_15m_pct=15.0,
-            trade_delta_15m_usd=200000,
-            liquidations_15m={"long_usd": 30000, "short_usd": 350000},
+            oi_change_15m_pct=12.0,
+            trade_delta_15m_usd=80_000,
+            liquidations_15m={"long_usd": 0, "short_usd": 200_000},
         )
         self.assertEqual(regime["regime"], "fresh_position_building")
-        self.assertGreater(regime["confidence"], 40)
+        self.assertGreater(regime["confidence"], 60)
 
     def test_liquidation_map_and_squeeze_context(self):
         payload = {"code": "0", "data": {"data": {
