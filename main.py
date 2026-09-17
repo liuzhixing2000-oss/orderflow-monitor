@@ -74,9 +74,15 @@ def get_liquidation_squeeze_context(symbol: str) -> dict:
         "live_confirmation": {
             "trade_flow": snapshot["trade_flow"],
             "open_interest": snapshot["open_interest"],
+            "liquidations_1m": snapshot["liquidations_1m"],
             "liquidations_5m": snapshot["liquidations_5m"],
+            "liquidations_15m": snapshot["liquidations_15m"],
+            "liquidations_by_exchange": snapshot["liquidations_by_exchange"],
+            "liquidation_regime": snapshot["liquidation_regime"],
             "order_book": snapshot["order_book"],
             "structure": snapshot["structure"],
+            "feed_status": snapshot["feed_status"],
+            "binance_status": snapshot["binance_status"],
         },
     }
 
@@ -142,7 +148,7 @@ async def lifespan(app: FastAPI):
         await engine.stop()
 
 
-app = FastAPI(title="Crypto Order Flow Monitor", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="Crypto Order Flow Monitor", version="0.5.0", lifespan=lifespan)
 
 
 def authorize(x_api_key: str | None = Header(default=None)) -> None:
@@ -154,8 +160,12 @@ def authorize(x_api_key: str | None = Header(default=None)) -> None:
 def health():
     return {
         "ok": True,
-        "version": "0.4.0",
-        "liquidation_map": "enabled" if settings.coinglass_api_key else "needs_COINGLASS_API_KEY",
+        "version": "0.5.0",
+        "liquidation_map": "enabled" if settings.coinglass_api_key else "optional (no COINGLASS_API_KEY)",
+        "liquidation_feeds": {
+            "bybit": "required (allLiquidation stream)",
+            "binance": "optional (USD-M forceOrder stream, free)",
+        },
         "symbols": settings.symbol_list,
         "feeds": {s: x.connected for s, x in engine.states.items()},
         "mcp": "/mcp/",
@@ -209,3 +219,4 @@ def score_buckets(symbol: str, horizon: int = 60, side: str = "long"):
 
 
 app.mount("/mcp", mcp_http_app)
+
