@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any
@@ -43,6 +44,16 @@ class MarketState:
         "status": "unavailable", "reason": "COINGLASS_API_KEY is not configured"
     })
 
+    # CVD is cumulative within one process session, never a rolling-window sum.
+    session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    cvd_usd: float = 0.0
+    flow_started_at: float | None = None
+    continuous_since: float | None = None
+
+    def mark_disconnected(self) -> None:
+        self.connected = False
+        self.continuous_since = None
+
     def prune(self) -> None:
         cutoff = time.time() - settings.history_seconds
         for series in (self.trades, self.oi, self.liquidations):
@@ -52,6 +63,11 @@ class MarketState:
     def add_trade(self, ts: float, side: str, price: float, qty: float) -> None:
         usd = price * qty
         signed = usd if side.lower() == "buy" else -usd
+        if self.flow_started_at is None:
+            self.flow_started_at = ts
+        if self.continuous_since is None:
+            self.continuous_since = ts
+        self.cvd_usd += signed
         self.trades.append((ts, signed, usd, side, price))
         self.price, self.last_update = price, ts
         self.prune()
@@ -67,14 +83,24 @@ class MarketState:
                 else:
                     target[price] = qty
 
-    def window(self, seconds: int) -> dict[str, Any]:
-        cutoff = time.time() - seconds
-        rows = [x for x in self.trades if x[0] >= cutoff]
+    def window(self, seconds: int, now: float | None = None) -> dict[str, Any]:
+        now = time.time() if now is None else now
+        cutoff = now - seconds
+        rows = [x for x in tuple(self.trades) if cutoff < x[0] <= now]
+        complete = (self.connected and self.continuous_since is not None
+                    and self.continuous_since <= cutoff
+                    and settings.history_seconds >= seconds)
+        status = ("complete" if complete else "disconnected" if not self.connected
+                  else "insufficient_retention" if settings.history_seconds < seconds
+                  else "warming_up_or_gap")
         buy = sum(x[2] for x in rows if x[3].lower() == "buy")
         sell = sum(x[2] for x in rows if x[3].lower() == "sell")
         total = buy + sell
         large = [x for x in rows if x[2] >= settings.large_trade_usd]
         return {
+            "status": status, "complete": complete,
+            "window_seconds": seconds, "window_start": cutoff, "window_end": now,
+            "continuous_since": self.continuous_since,
             "buy_usd": round(buy, 2), "sell_usd": round(sell, 2),
             "delta_usd": round(buy - sell, 2),
             "buy_ratio": round(buy / total, 4) if total else None,
@@ -92,12 +118,17 @@ class MarketState:
         return {"imbalance": round((bid-ask)/denom, 4) if denom else None,
                 "bid_usd": round(bid, 2), "ask_usd": round(ask, 2)}
 
-    def oi_change(self, seconds: int) -> float | None:
-        if not self.oi:
+    def oi_change(self, seconds: int, now: float | None = None) -> float | None:
+        now = time.time() if now is None else now
+        rows = tuple(self.oi)
+        if not rows or not self.connected or now - rows[-1][0] > 60:
             return None
-        cutoff = time.time() - seconds
-        old = next((v for ts, v in self.oi if ts >= cutoff), self.oi[0][1])
-        return pct_change(self.oi[-1][1], old)
+        cutoff = now - seconds
+        # Never substitute a startup sample for a full-window baseline.
+        baseline = next(((ts, v) for ts, v in reversed(rows) if ts <= cutoff), None)
+        if baseline is None or cutoff - baseline[0] > 60:
+            return None
+        return pct_change(rows[-1][1], baseline[1])
 
     def price_change(self, seconds: int) -> float | None:
         cutoff = time.time() - seconds
@@ -112,8 +143,10 @@ class MarketState:
                 "short_usd": round(sum(x[2] for x in rows if x[1].lower()=="buy"), 2)}
 
     def snapshot(self) -> dict[str, Any]:
-        windows = {k: self.window(v) for k, v in {"1m":60,"5m":300,"15m":900}.items()}
-        cvd = sum(x[1] for x in self.trades)
+        now = time.time()
+        self.prune()
+        windows = {k: self.window(v, now) for k, v in
+                   {"1m":60,"5m":300,"15m":900,"1h":3600,"4h":14400}.items()}
         book = {"0.1pct": self.book_imbalance(.001), "0.5pct": self.book_imbalance(.005)}
         signals, long_score, short_score = [], 0, 0
         s1 = self.structure.get("1h", {}).get("trend")
@@ -136,7 +169,7 @@ class MarketState:
         imb = book["0.1pct"]["imbalance"]
         if imb is not None and imb > .12: signals.append("近端买盘深度占优"); long_score += min(5, round(abs(imb)*10))
         elif imb is not None and imb < -.12: signals.append("近端卖盘深度占优"); short_score += min(5, round(abs(imb)*10))
-        oic = self.oi_change(900)
+        oic = self.oi_change(900, now)
         if oic is not None and abs(oic) >= .15:
             signals.append(f"15分钟OI{'增加' if oic>0 else '下降'} {abs(oic):.2f}%")
             if oic > 0:
@@ -158,12 +191,17 @@ class MarketState:
             price_change_5m_pct=self.price_change(300),
         )
         return {
-            "symbol": self.symbol, "timestamp": time.time(), "price": self.price,
+            "symbol": self.symbol, "timestamp": now, "data_schema_version": "0.5.0", "price": self.price,
             "feed_status": "live" if self.connected else "reconnecting",
             "last_update_age_seconds": round(time.time()-self.last_update, 1) if self.last_update else None,
-            "trade_flow": windows, "cvd_since_start_usd": round(cvd, 2),
+            "trade_flow": windows, "cvd_since_start_usd": round(self.cvd_usd, 2),
+            "cvd_session_id": self.session_id,
+            "cvd_started_at": self.flow_started_at,
+            "cvd_note": "Received trades in this session; gaps are not backfilled. Use trade_flow windows and complete flags.",
             "open_interest": {"latest": self.oi[-1][1] if self.oi else None,
-                              "change_5m_pct": self.oi_change(300), "change_15m_pct": oic},
+                              "change_5m_pct": self.oi_change(300, now), "change_15m_pct": oic,
+                              "change_1h_pct": self.oi_change(3600, now),
+                              "change_4h_pct": self.oi_change(14400, now)},
             "order_book": book, "liquidations_5m": liquidations_5m,
             "structure": self.structure,
             "liquidation_map": self.liquidation_map,
@@ -203,13 +241,16 @@ class OrderFlowEngine:
                 async with websockets.connect(settings.bybit_ws_url, ping_interval=20, ping_timeout=20) as ws:
                     await ws.send(json.dumps({"op":"subscribe", "args":topics}))
                     for state in self.states.values(): state.connected = True
-                    async for raw in ws:
-                        self._handle(json.loads(raw))
+                    try:
+                        async for raw in ws:
+                            self._handle(json.loads(raw))
+                    finally:
+                        for state in self.states.values(): state.mark_disconnected()
             except asyncio.CancelledError:
                 return
             except Exception as exc:
                 log.warning("WebSocket reconnecting: %s", exc)
-                for state in self.states.values(): state.connected = False
+                for state in self.states.values(): state.mark_disconnected()
                 await asyncio.sleep(3)
 
     def _handle(self, msg: dict) -> None:
