@@ -1,0 +1,226 @@
+{
+  "recorded": 38,
+  "evaluated": 36,
+  "excluded": [
+    {
+      "entry_utc": "2026-09-14T00:27:42.497070+00:00",
+      "reason": "LATE_EXIT"
+    },
+    {
+      "entry_utc": "2026-09-23T01:37:54.904571+00:00",
+      "reason": "IMMATURE_OR_MISSING_EXIT"
+    }
+  ],
+  "entry_diagnostics": {
+    "cancelled_next_entry": 1
+  },
+  "short_scores_sha256": "d7c752104464db0b79cdd65b9779b8a826b33fcbfadf366fdf860036a118dddd",
+  "protocol_sha256": "384ff26cd2ca2477d03bccac5fd6666a365e67456abceaaee91ddafcfc2b145d",
+  "data_manifest": {
+    "n": 17592,
+    "first": "2026-09-08T02:04:38.030233+00:00",
+    "last": "2026-09-23T02:18:33.954589+00:00",
+    "midpoint": "2026-09-15T14:11:35.992411+00:00",
+    "sha256_uncompressed": "24d8916e0d94c444e3cc81790aa6e75d1f826ee6987d46d95fdd478e467b2d9f",
+    "versions": {
+      "0.1.2-research": 17592
+    },
+    "sources": {
+      "sample_b_export": 8262,
+      "railway_log:2026-09-16": 1117,
+      "railway_log:2026-09-17": 1343,
+      "railway_log:2026-09-18": 1350,
+      "railway_log:2026-09-19": 1355,
+      "railway_log:2026-09-20": 1381,
+      "railway_log:2026-09-21": 1333,
+      "railway_log:2026-09-22": 1321,
+      "railway_log:2026-09-23": 130
+    },
+    "gaps_over_180s": [
+      {
+        "after": "2026-09-14T01:12:06.523389+00:00",
+        "before": "2026-09-16T04:03:43.911432+00:00",
+        "seconds": 183097.3880429268
+      }
+    ],
+    "context_available": {
+      "prior_day": 7774,
+      "prior_1h": 10390,
+      "prior_4h": 10361
+    },
+    "context_pass": {
+      "prior_day": 9,
+      "prior_1h": 409,
+      "prior_4h": 111
+    },
+    "note": "Recovered subset, not full SQLite export; minute-sampled levels and outcomes; exploratory."
+  },
+  "summary": {
+    "fixed": {
+      "all": {
+        "n": 36,
+        "mean_r": 0.08762294204438457,
+        "median_r": 0.9463475111782912,
+        "mean_pct": 0.024126482793299146,
+        "win_rate": 0.6111111111111112,
+        "sum_r": 3.1544259135978447,
+        "observed_mark_to_market_drawdown_r": 7.105060137509549,
+        "mean_cost_r": 0.8519864378839493,
+        "entry_days": 12,
+        "best_day": "2026-09-10",
+        "mean_without_best_day_r": -0.08881150893014345,
+        "reasons": {
+          "target": 22,
+          "stop": 14
+        }
+      },
+      "first_half": {
+        "n": 21,
+        "mean_r": 0.15618640088680036,
+        "median_r": 0.998744111349015,
+        "mean_pct": 0.03779146185792623,
+        "win_rate": 0.6666666666666666,
+        "sum_r": 3.2799144186228073,
+        "observed_mark_to_market_drawdown_r": 5.615194974875605,
+        "mean_cost_r": 0.9066121093538377,
+        "entry_days": 6,
+        "best_day": "2026-09-10",
+        "mean_without_best_day_r": -0.16925711752528938,
+        "reasons": {
+          "target": 14,
+          "stop": 7
+        }
+      },
+      "second_half": {
+        "n": 15,
+        "mean_r": -0.008365900334997504,
+        "median_r": 0.8091498024917811,
+        "mean_pct": 0.004995512102821231,
+        "win_rate": 0.5333333333333333,
+        "sum_r": -0.12548850502496256,
+        "observed_mark_to_market_drawdown_r": 7.105060137509549,
+        "mean_cost_r": 0.7755104978261056,
+        "entry_days": 6,
+        "best_day": "2026-09-18",
+        "mean_without_best_day_r": -0.4226071935215043,
+        "reasons": {
+          "target": 8,
+          "stop": 7
+        }
+      }
+    },
+    "price_trail": {
+      "all": {
+        "n": 36,
+        "mean_r": -0.06971384906971391,
+        "median_r": -0.41769178924448913,
+        "mean_pct": -0.0028656055698226763,
+        "win_rate": 0.3888888888888889,
+        "sum_r": -2.5096985665097007,
+        "observed_mark_to_market_drawdown_r": 11.007897532126325,
+        "mean_cost_r": 0.8519864378839493,
+        "entry_days": 12,
+        "best_day": "2026-09-20",
+        "mean_without_best_day_r": -0.21023434038341896,
+        "reasons": {
+          "stop": 36
+        }
+      },
+      "first_half": {
+        "n": 21,
+        "mean_r": -0.2486975653665472,
+        "median_r": -0.3348624390244046,
+        "mean_pct": -0.02308218738210896,
+        "win_rate": 0.38095238095238093,
+        "sum_r": -5.222648872697491,
+        "observed_mark_to_market_drawdown_r": 8.476234442852123,
+        "mean_cost_r": 0.9066121093538377,
+        "entry_days": 6,
+        "best_day": "2026-09-10",
+        "mean_without_best_day_r": -0.4246447272136324,
+        "reasons": {
+          "stop": 21
+        }
+      },
+      "second_half": {
+        "n": 15,
+        "mean_r": 0.18086335374585266,
+        "median_r": -0.5005211394645737,
+        "mean_pct": 0.025437608967378122,
+        "win_rate": 0.4,
+        "sum_r": 2.71295030618779,
+        "observed_mark_to_market_drawdown_r": 7.626203895323451,
+        "mean_cost_r": 0.7755104978261056,
+        "entry_days": 6,
+        "best_day": "2026-09-20",
+        "mean_without_best_day_r": -0.12946156791884972,
+        "reasons": {
+          "stop": 15
+        }
+      }
+    },
+    "score_trail": {
+      "all": {
+        "n": 36,
+        "mean_r": -0.21743493743854492,
+        "median_r": -0.6318495667831989,
+        "mean_pct": -0.020744483878569888,
+        "win_rate": 0.3055555555555556,
+        "sum_r": -7.827657747787617,
+        "observed_mark_to_market_drawdown_r": 11.427518899022111,
+        "mean_cost_r": 0.8519864378839493,
+        "entry_days": 12,
+        "best_day": "2026-09-18",
+        "mean_without_best_day_r": -0.3550238760425424,
+        "reasons": {
+          "score": 23,
+          "stop": 13
+        }
+      },
+      "first_half": {
+        "n": 21,
+        "mean_r": -0.24321971029443964,
+        "median_r": -0.5588747999604984,
+        "mean_pct": -0.027842243946853334,
+        "win_rate": 0.3333333333333333,
+        "sum_r": -5.107613916183232,
+        "observed_mark_to_market_drawdown_r": 8.707475067417729,
+        "mean_cost_r": 0.9066121093538377,
+        "entry_days": 6,
+        "best_day": "2026-09-10",
+        "mean_without_best_day_r": -0.45777275091983405,
+        "reasons": {
+          "score": 14,
+          "stop": 7
+        }
+      },
+      "second_half": {
+        "n": 15,
+        "mean_r": -0.18133625544029228,
+        "median_r": -0.8158881798845941,
+        "mean_pct": -0.010807619782973066,
+        "win_rate": 0.26666666666666666,
+        "sum_r": -2.7200438316043845,
+        "observed_mark_to_market_drawdown_r": 7.245388692902139,
+        "mean_cost_r": 0.7755104978261056,
+        "entry_days": 6,
+        "best_day": "2026-09-18",
+        "mean_without_best_day_r": -0.5356306053279392,
+        "reasons": {
+          "stop": 6,
+          "score": 9
+        }
+      }
+    }
+  },
+  "paired": {
+    "mean_difference_r": -0.147721088368831,
+    "improved": 14,
+    "worsened": 9,
+    "unchanged": 13,
+    "price_winners_cut": 6,
+    "price_losers_improved": 12,
+    "best_increment_day": "2026-09-12",
+    "mean_difference_without_best_increment_day_r": -0.21888050225249475
+  }
+}
