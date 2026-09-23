@@ -1,0 +1,92 @@
+{
+  "50": {
+    "prior_day": {
+      "unknown_context": 19,
+      "kept": 0,
+      "removed": 15,
+      "removed_winners": 10,
+      "removed_losers": 5
+    },
+    "prior_1h": {
+      "unknown_context": 15,
+      "kept": 0,
+      "removed": 19,
+      "removed_winners": 11,
+      "removed_losers": 8
+    },
+    "prior_4h": {
+      "unknown_context": 15,
+      "kept": 0,
+      "removed": 19,
+      "removed_winners": 11,
+      "removed_losers": 8
+    },
+    "any": {
+      "unknown_context": 19,
+      "kept": 0,
+      "removed": 15,
+      "removed_winners": 10,
+      "removed_losers": 5
+    }
+  },
+  "60": {
+    "prior_day": {
+      "unknown_context": 12,
+      "kept": 0,
+      "removed": 11,
+      "removed_winners": 6,
+      "removed_losers": 5
+    },
+    "prior_1h": {
+      "unknown_context": 9,
+      "kept": 0,
+      "removed": 14,
+      "removed_winners": 7,
+      "removed_losers": 7
+    },
+    "prior_4h": {
+      "unknown_context": 9,
+      "kept": 0,
+      "removed": 14,
+      "removed_winners": 7,
+      "removed_losers": 7
+    },
+    "any": {
+      "unknown_context": 12,
+      "kept": 0,
+      "removed": 11,
+      "removed_winners": 6,
+      "removed_losers": 5
+    }
+  },
+  "70": {
+    "prior_day": {
+      "unknown_context": 0,
+      "kept": 0,
+      "removed": 0,
+      "removed_winners": 0,
+      "removed_losers": 0
+    },
+    "prior_1h": {
+      "unknown_context": 0,
+      "kept": 0,
+      "removed": 0,
+      "removed_winners": 0,
+      "removed_losers": 0
+    },
+    "prior_4h": {
+      "unknown_context": 0,
+      "kept": 0,
+      "removed": 0,
+      "removed_winners": 0,
+      "removed_losers": 0
+    },
+    "any": {
+      "unknown_context": 0,
+      "kept": 0,
+      "removed": 0,
+      "removed_winners": 0,
+      "removed_losers": 0
+    }
+  }
+}

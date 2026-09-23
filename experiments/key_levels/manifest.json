@@ -1,0 +1,39 @@
+{
+  "n": 17592,
+  "first": "2026-09-08T02:04:38.030233+00:00",
+  "last": "2026-09-23T02:18:33.954589+00:00",
+  "midpoint": "2026-09-15T14:11:35.992411+00:00",
+  "sha256_uncompressed": "24d8916e0d94c444e3cc81790aa6e75d1f826ee6987d46d95fdd478e467b2d9f",
+  "versions": {
+    "0.1.2-research": 17592
+  },
+  "sources": {
+    "sample_b_export": 8262,
+    "railway_log:2026-09-16": 1117,
+    "railway_log:2026-09-17": 1343,
+    "railway_log:2026-09-18": 1350,
+    "railway_log:2026-09-19": 1355,
+    "railway_log:2026-09-20": 1381,
+    "railway_log:2026-09-21": 1333,
+    "railway_log:2026-09-22": 1321,
+    "railway_log:2026-09-23": 130
+  },
+  "gaps_over_180s": [
+    {
+      "after": "2026-09-14T01:12:06.523389+00:00",
+      "before": "2026-09-16T04:03:43.911432+00:00",
+      "seconds": 183097.3880429268
+    }
+  ],
+  "context_available": {
+    "prior_day": 7774,
+    "prior_1h": 10390,
+    "prior_4h": 10361
+  },
+  "context_pass": {
+    "prior_day": 9,
+    "prior_1h": 409,
+    "prior_4h": 111
+  },
+  "note": "Recovered subset, not full SQLite export; minute-sampled levels and outcomes; exploratory."
+}
